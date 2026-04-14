@@ -15,10 +15,10 @@
     <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
     
-    <!-- 引入 Babel -->
+    <!-- 引入 Babel (用來在瀏覽器中即時解析 JSX) -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- 引入 Firebase SDK (相容舊版寫法) -->
+    <!-- 引入 Firebase SDK (相容純 HTML 檔案的 CDN 寫法) -->
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -70,7 +70,7 @@
 
         const getGameRef = (gameId) => db.doc(`artifacts/${appId}/public/data/games/${gameId}`);
 
-        // --- 安全更新網址工具 (修復 SecurityError) ---
+        // --- 安全更新網址工具 ---
         const safeUpdateUrl = (gameId) => {
             try {
                 if (window.self !== window.top) return; 
@@ -131,11 +131,11 @@
                 if (phase === 'initial') setValue(start);
                 else if (phase === 'rolling' || phase === 'reordered') {
                     let startTimestamp = null;
-                    const duration = 1500; // 滾動動畫持續 1.5 秒
+                    const duration = 1500; 
                     const step = (timestamp) => {
                         if (!startTimestamp) startTimestamp = timestamp;
                         const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-                        const ease = 1 - Math.pow(1 - progress, 4); // easeOutQuart 減速效果
+                        const ease = 1 - Math.pow(1 - progress, 4); 
                         setValue(Math.floor(start + (end - start) * ease));
                         if (progress < 1) window.requestAnimationFrame(step);
                         else setValue(end);
@@ -235,7 +235,7 @@
             const [loading, setLoading] = useState(true);
             const [view, setView] = useState('join');
             
-            // 預設為完全空白的題庫
+            // 題庫預設為空白
             const [reusableQuestions, setReusableQuestions] = useState([]);
 
             useEffect(() => {
@@ -989,7 +989,7 @@
                                     <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center"><CheckCircle2 className="mr-2 text-green-500" style={{fontSize: 28}} /> 已建立題庫 ({questions.length})</h2>
                                     <div className="flex gap-3 relative">
                                         <button onClick={() => {
-                                            const content = csvHeaders.join(',') + '\nfill,求以下各題的未知數,,30,51.3|51.3°,false,,,,,,,,,,,,,,,,,,';
+                                            const content = csvHeaders.join(',') + '\nsingle,太陽從哪邊升起？,,20,,false,東邊,true,,西邊,false,,南邊,false,,北邊,false,';
                                             downloadFile(content, '題庫格式範本.csv');
                                         }} title="下載 Excel/CSV 格式範本" className="p-3 text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 rounded-xl transition"><FileText style={{fontSize: 20}} /></button>
                                         <button onClick={() => fileInputRef.current.click()} title="從 Excel 匯入" className="p-3 text-gray-500 hover:text-green-600 bg-gray-100 hover:bg-green-50 rounded-xl transition"><Upload style={{fontSize: 20}} /></button>
@@ -2180,6 +2180,7 @@
 
             return (
                 <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-hidden relative">
+                    {/* --- 主持人專屬：左下角直接結束遊戲按鈕 --- */}
                     {isHost && (
                         <button 
                             onClick={async () => { 
