@@ -1646,6 +1646,21 @@
                         </button>
                     )}
 
+                    {/* --- 主持人專屬：左下角直接結束遊戲按鈕 --- */}
+                    {isHost && (
+                        <button 
+                            onClick={async () => { 
+                                if (window.confirm("確定要立刻結束遊戲並進入最終排名嗎？")) {
+                                    await getGameRef(gameId).update({ status: 'finished' });
+                                }
+                            }} 
+                            className="absolute bottom-4 left-4 md:bottom-8 md:left-8 px-5 py-3 bg-gray-700/80 hover:bg-red-600 text-white rounded-2xl font-bold transition shadow-xl z-[150] flex items-center border border-gray-500 hover:border-red-400 backdrop-blur-md"
+                            title="強制結束遊戲，直接進入結算"
+                        >
+                            <XCircle className="mr-2 text-xl" /> 結束遊戲
+                        </button>
+                    )}
+
                     <div className="w-full max-w-4xl">
                         <div className="flex justify-between items-center mb-6 md:mb-8 text-white">
                             <div className="bg-white/10 px-5 py-2.5 rounded-full font-bold text-base md:text-lg tracking-widest uppercase ml-auto md:ml-0">題目 {qIndex + 1} / {totalQ}</div>
@@ -1909,7 +1924,22 @@
             if (!currentQ.type) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl md:text-2xl"><Clock className="animate-spin mr-3" /> 載入統計資料中...</div>;
 
             return (
-                <div className="min-h-screen bg-gray-900 py-8 md:py-12 px-4 md:px-8 font-sans flex flex-col items-center">
+                <div className="min-h-screen bg-gray-900 py-8 md:py-12 px-4 md:px-8 font-sans flex flex-col items-center relative">
+                    {/* --- 主持人專屬：左下角直接結束遊戲按鈕 --- */}
+                    {isHost && (
+                        <button 
+                            onClick={async () => { 
+                                if (window.confirm("確定要立刻結束遊戲並進入最終排名嗎？")) {
+                                    await getGameRef(gameId).update({ status: 'finished' });
+                                }
+                            }} 
+                            className="absolute bottom-4 left-4 md:bottom-8 md:left-8 px-5 py-3 bg-gray-700/80 hover:bg-red-600 text-white rounded-2xl font-bold transition shadow-xl z-[150] flex items-center border border-gray-500 hover:border-red-400 backdrop-blur-md"
+                            title="強制結束遊戲，直接進入結算"
+                        >
+                            <XCircle className="mr-2 text-xl" /> 結束遊戲
+                        </button>
+                    )}
+
                     <div className="w-full max-w-4xl">
                         {isPlayer && (
                             <div className={`rounded-[2rem] p-8 md:p-12 mb-8 text-center text-white shadow-2xl transform transition-all duration-500 scale-100 ${resultStats.isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
@@ -2116,7 +2146,22 @@
             }, [isHost, isTransitioning, qIndex, gameId, gameState.questions]); 
 
             return (
-                <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-hidden">
+                <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-hidden relative">
+                    {/* --- 主持人專屬：左下角直接結束遊戲按鈕 --- */}
+                    {isHost && (
+                        <button 
+                            onClick={async () => { 
+                                if (window.confirm("確定要立刻結束遊戲並進入最終排名嗎？")) {
+                                    await getGameRef(gameId).update({ status: 'finished' });
+                                }
+                            }} 
+                            className="absolute bottom-4 left-4 md:bottom-8 md:left-8 px-5 py-3 bg-gray-700/80 hover:bg-red-600 text-white rounded-2xl font-bold transition shadow-xl z-[150] flex items-center border border-gray-500 hover:border-red-400 backdrop-blur-md"
+                            title="強制結束遊戲，直接進入結算"
+                        >
+                            <XCircle className="mr-2 text-xl" /> 結束遊戲
+                        </button>
+                    )}
+
                     <div className="w-full max-w-7xl z-10">
                         <div className="text-center mb-10 interim-item" style={{ animationDelay: '0.1s' }}>
                             <h2 className="text-2xl md:text-3xl font-bold text-blue-400 mb-3 uppercase tracking-widest">第 {qIndex + 1} 題結束</h2>
