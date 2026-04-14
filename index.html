@@ -25,6 +25,9 @@
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
 
     <style>
+        /* 將整體基礎尺寸縮小 5%，讓畫面所有 Tailwind 元素等比縮小 */
+        html { font-size: 95%; }
+
         .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
@@ -173,8 +176,9 @@
                 const initAuth = async () => {
                     try {
                         await auth.signInAnonymously();
+                        console.log("Firebase 匿名登入成功！UID:", auth.currentUser?.uid);
                     } catch (err) {
-                        console.error("Firebase 匿名登入失敗:", err);
+                        console.error("Firebase 匿名登入失敗 (請確認後台設定):", err);
                     } finally {
                         setUser(auth.currentUser);
                         setLoading(false);
@@ -983,7 +987,6 @@
             const [hostNickname, setHostNickname] = useState('');
             const [isJoiningHost, setIsJoiningHost] = useState(false);
 
-            // --- 新增：勵志格言庫與循環輪播狀態 ---
             const quotes = [
                 "每個人的花期不同，不必焦慮有人比你提前擁有",
                 "成功就是在緊要處多一份堅持",
@@ -1003,16 +1006,15 @@
             useEffect(() => {
                 if (isHost) return;
                 const interval = setInterval(() => {
-                    setQuoteFade(false); // 觸發淡出
+                    setQuoteFade(false);
                     setTimeout(() => {
                         setQuoteIndex(prev => {
                             let next = Math.floor(Math.random() * quotes.length);
-                            // 確保隨機不重複上一句
                             if (next === prev) next = (next + 1) % quotes.length;
                             return next;
                         });
-                        setQuoteFade(true); // 觸發淡入
-                    }, 500); // 配合 CSS transition 時間
+                        setQuoteFade(true);
+                    }, 500); 
                 }, 9000);
                 return () => clearInterval(interval);
             }, [isHost]);
@@ -1122,7 +1124,6 @@
                             
                             <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">等待遊戲開始</h2>
                             
-                            {/* --- 更新：隨機勵志格言輪播區塊 --- */}
                             <div className="h-24 flex items-center justify-center mb-6">
                                 <p className={`text-base md:text-lg text-blue-200/90 font-medium transition-opacity duration-500 px-2 ${quoteFade ? 'opacity-100' : 'opacity-0'}`}>
                                     {quotes[quoteIndex]}
@@ -1132,7 +1133,6 @@
                             <div className="bg-black/30 rounded-2xl p-6 border border-white/10 shadow-inner text-gray-800">
                                 <p className="text-sm md:text-base text-gray-400 font-bold mb-3 uppercase tracking-widest">你的參賽身分</p>
                                 
-                                {/* --- 更新：點擊即可編輯的專屬暱稱區塊 --- */}
                                 <div className="flex justify-center group cursor-pointer" onClick={() => { if(!editingNickname){ setNewNickname(gameState.players[user.uid]?.nickname); setEditingNickname(true); }}}>
                                     {editingNickname ? (
                                         <input type="text" autoFocus className="w-full max-w-[200px] bg-transparent border-b-2 border-white/50 focus:border-white text-center outline-none font-black text-3xl md:text-4xl text-white placeholder-white/50" value={newNickname} onChange={e => setNewNickname(e.target.value)} onBlur={saveNickname} onKeyDown={e => e.key === 'Enter' && saveNickname()} maxLength="12" />
