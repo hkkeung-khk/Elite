@@ -1,0 +1,1813 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多人連線問答遊戲</title>
+    
+    <!-- 引入 Tailwind CSS 框架 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 FontAwesome 作為圖示庫 (替代原本的 lucide-react) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 引入 React 與 ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    
+    <!-- 引入 Babel 讓瀏覽器可以直接編譯 JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 引入 Firebase SDK (相容舊版 v8 寫法，最適合單一 HTML 檔案) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <!-- 新增：引入 Firebase Analytics SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics-compat.js"></script>
+
+    <style>
+        /* 自訂滾動條與進場動畫 */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.4); }
+        
+        .animate-fade-in-up { animation: fadeInUp 0.6s ease-out forwards; }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slideRightFade {
+          0% { opacity: 0; transform: translateX(-40px) scale(0.95); }
+          100% { opacity: 1; transform: translateX(0) scale(1); }
+        }
+        .interim-item { opacity: 0; animation: slideRightFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+        @keyframes slideUpFade {
+          0% { opacity: 0; transform: translateY(40px) scale(0.95); }
+          100% { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .leaderboard-item { opacity: 0; animation: slideUpFade 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    </style>
+</head>
+<body class="bg-gray-900 font-sans antialiased text-gray-800">
+    <!-- React 應用的掛載點 -->
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useMemo, useRef } = React;
+
+        // --- Firebase 初始化設定 ---
+        let firebaseConfig = {};
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            // 【整合完成】：使用您提供的專屬 Firebase 設定
+            firebaseConfig = {
+                apiKey: "AIzaSyCXwi1vuQ7yyIrAgPxK9P4r9MneAJqXnqU",
+                authDomain: "etlite-f7c2a.firebaseapp.com",
+                databaseURL: "https://etlite-f7c2a-default-rtdb.firebaseio.com",
+                projectId: "etlite-f7c2a",
+                storageBucket: "etlite-f7c2a.firebasestorage.app",
+                messagingSenderId: "400273321762",
+                appId: "1:400273321762:web:e619520536fec308a17f7b",
+                measurementId: "G-Q524BFZFB8"
+            };
+        }
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+            // 啟動 Analytics 分析功能
+            if (firebaseConfig.measurementId) {
+                firebase.analytics();
+            }
+        }
+        
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        // 將遊戲專案識別碼更新為您的 Firebase projectId
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'etlite-f7c2a';
+
+        // Firestore 捷徑函數
+        const getGameRef = (gameId) => db.doc(`artifacts/${appId}/public/data/games/${gameId}`);
+
+        // --- 虛擬 Icon 元件庫 (對應 FontAwesome) ---
+        const Icon = ({ name, size, className = '', title }) => {
+            const faMap = {
+                Play: 'fa-play', Plus: 'fa-plus', Trash2: 'fa-trash', Users: 'fa-user-friends',
+                Clock: 'fa-clock', Trophy: 'fa-trophy', Share2: 'fa-share-alt', Copy: 'fa-copy',
+                CheckCircle2: 'fa-check-circle', XCircle: 'fa-times-circle', ArrowRight: 'fa-arrow-right',
+                Download: 'fa-download', Upload: 'fa-upload', FileText: 'fa-file-alt', Edit: 'fa-edit',
+                ImagePlus: 'fa-image', X: 'fa-times', GripVertical: 'fa-grip-vertical',
+                Volume2: 'fa-volume-up', VolumeX: 'fa-volume-mute', Music: 'fa-music'
+            };
+            return <i className={`fas ${faMap[name]} ${className} flex items-center justify-center`} style={{ fontSize: size }} title={title}></i>;
+        };
+
+        const Play = (props) => <Icon name="Play" {...props} />;
+        const Plus = (props) => <Icon name="Plus" {...props} />;
+        const Trash2 = (props) => <Icon name="Trash2" {...props} />;
+        const Users = (props) => <Icon name="Users" {...props} />;
+        const Clock = (props) => <Icon name="Clock" {...props} />;
+        const Trophy = (props) => <Icon name="Trophy" {...props} />;
+        const Share2 = (props) => <Icon name="Share2" {...props} />;
+        const Copy = (props) => <Icon name="Copy" {...props} />;
+        const CheckCircle2 = (props) => <Icon name="CheckCircle2" {...props} />;
+        const XCircle = (props) => <Icon name="XCircle" {...props} />;
+        const ArrowRight = (props) => <Icon name="ArrowRight" {...props} />;
+        const Download = (props) => <Icon name="Download" {...props} />;
+        const Upload = (props) => <Icon name="Upload" {...props} />;
+        const FileText = (props) => <Icon name="FileText" {...props} />;
+        const Edit = (props) => <Icon name="Edit" {...props} />;
+        const ImagePlus = (props) => <Icon name="ImagePlus" {...props} />;
+        const X = (props) => <Icon name="X" {...props} />;
+        const GripVertical = (props) => <Icon name="GripVertical" {...props} />;
+        const Volume2 = (props) => <Icon name="Volume2" {...props} />;
+        const VolumeX = (props) => <Icon name="VolumeX" {...props} />;
+        const Music = (props) => <Icon name="Music" {...props} />;
+
+        // --- Utility: 圖片自動壓縮技術 ---
+        const compressImage = (file, maxWidth = 400) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.readAsDataURL(file);
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.src = event.target.result;
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const scaleSize = maxWidth / img.width;
+                        const width = img.width > maxWidth ? maxWidth : img.width;
+                        const height = img.width > maxWidth ? img.height * scaleSize : img.height;
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.6));
+                    };
+                };
+            });
+        };
+
+        // --- 主要 App 容器 ---
+        function App() {
+            const [user, setUser] = useState(null);
+            const [gameId, setGameId] = useState(null);
+            const [gameState, setGameState] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [view, setView] = useState('join');
+            const [reusableQuestions, setReusableQuestions] = useState([]);
+
+            // 初始化驗證
+            useEffect(() => {
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            try {
+                                await auth.signInWithCustomToken(__initial_auth_token);
+                            } catch (tokenError) {
+                                console.warn("自訂 Token 驗證失敗，切換為匿名登入:", tokenError);
+                                await auth.signInAnonymously();
+                            }
+                        } else {
+                            await auth.signInAnonymously();
+                        }
+                    } catch (err) {
+                        console.error("Auth error:", err);
+                    } finally {
+                        setUser(auth.currentUser);
+                        setLoading(false);
+                    }
+                };
+                
+                initAuth();
+                const unsubscribe = auth.onAuthStateChanged(setUser);
+                return () => unsubscribe();
+            }, []);
+
+            // 取得網址參數中的遊戲 ID
+            useEffect(() => {
+                const params = new URLSearchParams(window.location.search);
+                const id = params.get('gameId');
+                if (id) {
+                    setGameId(id);
+                }
+            }, []);
+
+            // 監聽遊戲狀態
+            useEffect(() => {
+                if (!user || !gameId) return;
+
+                const unsubscribe = getGameRef(gameId).onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        setGameState({ id: docSnap.id, ...docSnap.data() });
+                    } else {
+                        setGameState(null);
+                        alert("找不到此遊戲房間！");
+                        setGameId(null);
+                    }
+                }, (error) => console.error("Firestore listen error:", error));
+
+                return () => unsubscribe();
+            }, [user, gameId]);
+
+            const gameStateRef = useRef(gameState);
+            useEffect(() => {
+                gameStateRef.current = gameState;
+            }, [gameState]);
+
+            // 本地防重複結算鎖
+            const evaluatingRef = useRef(false);
+            useEffect(() => {
+                evaluatingRef.current = false;
+            }, [gameState?.status]);
+
+            // 全域背景音樂控制
+            const [musicStatus, setMusicStatus] = useState('loading'); 
+            const audioRef = useRef(null);
+            const activeTrackRef = useRef(null);
+            const userMutedRef = useRef(false);
+
+            const currentTrack = useMemo(() => {
+                if (!gameState) return null;
+                if (['lobby', 'starting_countdown', 'finished'].includes(gameState.status)) return 'bg1.mp3';
+                if (['preview', 'playing', 'result', 'interim_leaderboard'].includes(gameState.status)) return 'bg5.mp3';
+                return null;
+            }, [gameState?.status]);
+
+            useEffect(() => {
+                const isHost = user && gameState && user.uid === gameState.hostId;
+                
+                if (!isHost || !currentTrack) {
+                    if (audioRef.current) {
+                        audioRef.current.pause();
+                        audioRef.current.src = "";
+                        audioRef.current = null;
+                        activeTrackRef.current = null;
+                    }
+                    return;
+                }
+
+                if (activeTrackRef.current !== currentTrack) {
+                    if (audioRef.current) {
+                        audioRef.current.pause();
+                        audioRef.current.src = "";
+                    }
+                    
+                    const bgMusic = new Audio(currentTrack);
+                    bgMusic.loop = true;
+                    bgMusic.volume = 0.5;
+                    audioRef.current = bgMusic;
+                    activeTrackRef.current = currentTrack;
+
+                    if (!userMutedRef.current) {
+                        setMusicStatus('loading');
+                        bgMusic.play()
+                            .then(() => setMusicStatus('playing'))
+                            .catch(error => {
+                                if (error.name === 'NotSupportedError') {
+                                    setMusicStatus('error');
+                                } else {
+                                    setMusicStatus('paused'); 
+                                }
+                            });
+                    } else {
+                        setMusicStatus('paused');
+                    }
+                }
+            }, [currentTrack, user, gameState?.hostId]);
+
+            const toggleMusic = () => {
+                if (!audioRef.current || musicStatus === 'error') return;
+                if (musicStatus === 'playing') {
+                    audioRef.current.pause();
+                    userMutedRef.current = true;
+                    setMusicStatus('paused');
+                } else {
+                    userMutedRef.current = false;
+                    audioRef.current.play()
+                        .then(() => setMusicStatus('playing'))
+                        .catch(() => setMusicStatus('error'));
+                }
+            };
+
+            // 結算與流程控制機制
+            useEffect(() => {
+                if (!user || !gameId) return;
+
+                const checkAndEvaluate = async () => {
+                    const currentGameState = gameStateRef.current;
+                    if (!currentGameState || user.uid !== currentGameState.hostId) return;
+
+                    if (!['starting_countdown', 'preview', 'playing'].includes(currentGameState.status)) return;
+
+                    const qIndex = currentGameState.currentQIndex !== undefined ? currentGameState.currentQIndex : 0;
+                    const currentQ = currentGameState.questions?.[qIndex];
+                    const gameRef = getGameRef(gameId);
+
+                    if (currentGameState.status === 'starting_countdown') {
+                        if (Date.now() >= currentGameState.countdownDeadline) {
+                            if (evaluatingRef.current) return;
+                            evaluatingRef.current = true;
+                            try {
+                                await gameRef.update({
+                                    status: 'preview',
+                                    currentQIndex: 0,
+                                    previewDeadline: Date.now() + 5000
+                                });
+                            } catch(e) { evaluatingRef.current = false; }
+                        }
+                        return;
+                    }
+
+                    if (!currentQ) return;
+
+                    if (currentGameState.status === 'preview') {
+                        if (Date.now() >= currentGameState.previewDeadline) {
+                            if (evaluatingRef.current) return;
+                            evaluatingRef.current = true;
+                            try {
+                                await gameRef.update({
+                                    status: 'playing',
+                                    deadline: Date.now() + (currentQ.timeLimit * 1000)
+                                });
+                            } catch(e) { evaluatingRef.current = false; }
+                        }
+                        return;
+                    }
+
+                    if (currentGameState.status === 'playing') {
+                        const answers = currentGameState.answers?.[qIndex] || {};
+                        const players = currentGameState.players || {};
+                        const playerIds = Object.keys(players);
+                        
+                        const allAnswered = playerIds.length > 0 && playerIds.every((id) => answers[id]);
+                        const timeUp = Date.now() >= currentGameState.deadline;
+
+                        if (allAnswered || timeUp) {
+                            if (evaluatingRef.current) return;
+                            evaluatingRef.current = true;
+
+                            let correctSubmissions = [];
+
+                            if (currentQ.type === 'fill') {
+                                const validAnswers = (currentQ.fillAnswers || (currentQ.fillAnswer ? [currentQ.fillAnswer] : []))
+                                    .map((a) => (currentQ.caseSensitive ? a.trim() : a.trim().toLowerCase()))
+                                    .filter((a) => a !== '');
+                                
+                                Object.entries(answers).forEach(([playerId, ansData]) => {
+                                    const userText = currentQ.caseSensitive ? (ansData.textAnswer || '').trim() : (ansData.textAnswer || '').trim().toLowerCase();
+                                    if (validAnswers.includes(userText) && userText !== '') {
+                                        correctSubmissions.push({ playerId, timestamp: ansData.timestamp });
+                                    }
+                                });
+                            } else {
+                                const correctOptionIds = (currentQ.options || []).filter((o) => o.isCorrect).map((o) => o.id).sort();
+                                Object.entries(answers).forEach(([playerId, ansData]) => {
+                                    const selected = [...(ansData.options || [])].sort();
+                                    if (JSON.stringify(selected) === JSON.stringify(correctOptionIds)) {
+                                        correctSubmissions.push({ playerId, timestamp: ansData.timestamp });
+                                    }
+                                });
+                            }
+
+                            correctSubmissions.sort((a, b) => a.timestamp - b.timestamp);
+                            const newPlayers = { ...players };
+                            const updates = { status: 'result' };
+                            
+                            correctSubmissions.forEach((sub, index) => {
+                                const remainingSecs = Math.max(0, (currentGameState.deadline - sub.timestamp) / 1000);
+                                let points = 10;
+                                if (index === 0) points += 5;
+                                if (remainingSecs >= currentQ.timeLimit / 2) points += 3;
+                                else if (remainingSecs >= currentQ.timeLimit / 4) points += 2;
+                                else if (remainingSecs >= 3) points += 1;
+
+                                if (newPlayers[sub.playerId]) {
+                                    newPlayers[sub.playerId].score = (newPlayers[sub.playerId].score || 0) + points;
+                                    updates[`answers.${qIndex}.${sub.playerId}.pointsEarned`] = points;
+                                }
+                            });
+
+                            updates.players = newPlayers;
+                            
+                            try {
+                                await gameRef.update(updates);
+                            } catch(e) { evaluatingRef.current = false; }
+                        }
+                    }
+                };
+
+                const intervalId = setInterval(checkAndEvaluate, 250);
+                return () => clearInterval(intervalId);
+            }, [user, gameId]);
+
+            if (loading) {
+                return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl"><Clock className="animate-spin mr-3" /> 載入中...</div>;
+            }
+
+            if (!gameId) {
+                if (view === 'create') return <CreateGame user={user} onGameCreated={setGameId} onBack={() => setView('join')} initialQuestions={reusableQuestions} />;
+                return <JoinGame user={user} onSetGameId={setGameId} onNavigateCreate={() => { setReusableQuestions([]); setView('create'); }} />;
+            }
+
+            if (gameState && !gameState.players?.[user.uid] && gameState.hostId !== user.uid) {
+                return <JoinGame user={user} initialGameId={gameId} onSetGameId={setGameId} onNavigateCreate={() => { setReusableQuestions([]); setView('create'); }} gameState={gameState} />;
+            }
+
+            if (gameState) {
+                const isHost = user && user.uid === gameState.hostId;
+                return (
+                    <React.Fragment>
+                        {isHost && (
+                            <button
+                                onClick={toggleMusic}
+                                disabled={musicStatus === 'error'}
+                                className={`fixed top-4 right-4 md:top-8 md:right-8 p-3 md:p-5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-white backdrop-blur-md transition flex items-center justify-center z-[200] shadow-2xl group ${musicStatus === 'error' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                title={musicStatus === 'playing' ? "暫停音樂" : musicStatus === 'error' ? "無法載入音樂檔案" : "播放音樂"}
+                            >
+                                {musicStatus === 'playing' ? <Volume2 className="w-6 h-6 md:w-8 md:h-8 text-green-400 group-hover:scale-110 transition-transform" /> :
+                                 musicStatus === 'paused' ? <VolumeX className="w-6 h-6 md:w-8 md:h-8 text-yellow-400 group-hover:scale-110 transition-transform" /> :
+                                 musicStatus === 'error' ? <VolumeX className="w-6 h-6 md:w-8 md:h-8 text-red-500" /> :
+                                 <Music className="w-6 h-6 md:w-8 md:h-8 text-gray-400 animate-pulse" />}
+                            </button>
+                        )}
+                        {(() => {
+                            switch (gameState.status) {
+                                case 'lobby': return <Lobby user={user} gameState={gameState} gameId={gameId} />;
+                                case 'starting_countdown': return <StartingCountdown gameState={gameState} />;
+                                case 'preview': return <QuestionPreview gameState={gameState} />;
+                                case 'playing': return <Gameplay user={user} gameState={gameState} gameId={gameId} />;
+                                case 'result': return <Result user={user} gameState={gameState} gameId={gameId} />;
+                                case 'interim_leaderboard': return <InterimLeaderboard user={user} gameState={gameState} gameId={gameId} />;
+                                case 'finished': return <Leaderboard gameState={gameState} user={user} onBack={() => { setReusableQuestions([]); setView('join'); setGameId(null); }} onReplay={() => { setReusableQuestions(gameState.questions); setView('create'); setGameId(null); }} />;
+                                default: return <div>狀態錯誤</div>;
+                            }
+                        })()}
+                    </React.Fragment>
+                );
+            }
+
+            return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl"><Clock className="animate-spin mr-3" /> 載入遊戲中...</div>;
+        }
+
+        // --- 子元件定義 ---
+        const TeamChart = React.memo(({ players, teamCount }) => {
+            const { maxTeamScore, sortedTeams } = useMemo(() => {
+                const teamScores = {};
+                for (let i = 1; i <= teamCount; i++) {
+                    teamScores[`隊伍${i}`] = 0;
+                }
+                Object.values(players).forEach(p => {
+                    if (p.team) teamScores[p.team] = (teamScores[p.team] || 0) + p.score;
+                });
+                const maxScore = Math.max(...Object.values(teamScores).map(Number), 1); 
+                const sorted = Object.entries(teamScores).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
+                return { maxTeamScore: maxScore, sortedTeams: sorted };
+            }, [players, teamCount]);
+
+            const podiumColors = ['bg-[#e21b3c]', 'bg-[#1368ce]', 'bg-[#d89e00]', 'bg-[#26890c]', 'bg-[#864cbf]', 'bg-[#00a8ce]'];
+
+            return (
+                <div className="w-full max-w-4xl mb-10 bg-white/10 backdrop-blur-md p-6 md:p-10 rounded-3xl border border-white/20 animate-fade-in-up overflow-x-auto custom-scrollbar">
+                    <h3 className="text-center text-white font-black mb-8 tracking-widest text-2xl md:text-3xl drop-shadow-md">隊伍總排名</h3>
+                    <div className="flex items-end justify-center gap-4 md:gap-6 min-w-[500px] h-64 md:h-80 border-b-4 border-white/30 pb-0">
+                        {sortedTeams.map(([teamName, score], index) => {
+                            const heightPercentage = score === 0 ? 8 : Math.max((score / maxTeamScore) * 100, 8); 
+                            const barColor = podiumColors[index % podiumColors.length];
+                            return (
+                                <div key={teamName} className="flex flex-col items-center flex-1 max-w-[120px] group h-full justify-end">
+                                    <span className="text-white font-black text-3xl md:text-5xl mb-2 drop-shadow-lg group-hover:-translate-y-2 transition-transform">{score}</span>
+                                    <div className={`w-full ${barColor} transition-all duration-1000 ease-out shadow-lg relative flex flex-col items-center justify-end pb-4`} style={{ height: `${heightPercentage}%` }}>
+                                        <span className="text-white font-bold text-lg md:text-2xl drop-shadow-md whitespace-nowrap">{teamName}</span>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        });
+
+        function CreateGame({ user, onGameCreated, onBack, initialQuestions }) {
+            const [questions, setQuestions] = useState(initialQuestions || []);
+            const fileInputRef = useRef(null);
+            const [editingId, setEditingId] = useState(null);
+            const [isCreating, setIsCreating] = useState(false);
+            const [importFiles, setImportFiles] = useState(null);
+            const [customAlert, setCustomAlert] = useState(null);
+            
+            const [gameMode, setGameMode] = useState('solo');
+            const [teamCount, setTeamCount] = useState(2);
+
+            const defaultQ = { text: '', type: 'single', timeLimit: 20, options: [{ id: '1', text: '', isCorrect: false, imageBase64: '' }, { id: '2', text: '', isCorrect: false, imageBase64: '' }], fillAnswers: [''], imageBase64: '', caseSensitive: false };
+            const [currentQ, setCurrentQ] = useState(defaultQ);
+
+            const addOption = () => setCurrentQ({ ...currentQ, options: [...currentQ.options, { id: Date.now().toString(), text: '', isCorrect: false, imageBase64: '' }] });
+            const updateOption = (id, field, value) => {
+                setCurrentQ({ ...currentQ, options: currentQ.options.map(o => { if (o.id !== id) return currentQ.type === 'single' && field === 'isCorrect' && value ? { ...o, isCorrect: false } : o; return { ...o, [field]: value }; }) });
+            };
+            const removeOption = (id) => {
+                if (currentQ.options.length <= 2) return;
+                setCurrentQ({ ...currentQ, options: currentQ.options.filter(o => o.id !== id) });
+            };
+            const cancelEdit = () => {
+                setEditingId(null);
+                setCurrentQ({ ...defaultQ, options: [{ id: Date.now() + '1', text: '', isCorrect: false, imageBase64: '' }, { id: Date.now() + '2', text: '', isCorrect: false, imageBase64: '' }]});
+            };
+
+            const saveQuestion = () => {
+                if (!currentQ.text.trim() && !currentQ.imageBase64) return setCustomAlert("請輸入題目內容或上傳題目圖片！");
+                if (currentQ.type === 'fill') {
+                    if (!currentQ.fillAnswers || currentQ.fillAnswers.every(a => !a.trim())) return setCustomAlert("請至少輸入一個填空題的正確答案！");
+                } else {
+                    if (currentQ.options.some(o => !o.text.trim() && !o.imageBase64)) return setCustomAlert("請確保所有選項都有內容（文字或圖片）！");
+                    if (!currentQ.options.some(o => o.isCorrect)) return setCustomAlert("請至少選擇一個正確答案！");
+                }
+
+                const sanitizedQ = { ...currentQ };
+                if (sanitizedQ.type === 'fill') sanitizedQ.fillAnswers = sanitizedQ.fillAnswers.filter(a => a.trim() !== '');
+
+                if (editingId) {
+                    setQuestions(questions.map(q => q.id === editingId ? { ...sanitizedQ, id: editingId } : q));
+                    setEditingId(null);
+                } else {
+                    setQuestions([...questions, { ...sanitizedQ, id: Date.now().toString() }]);
+                }
+                cancelEdit();
+            };
+
+            const csvHeaders = ['題目類型(single/multiple/fill)', '題目內容', '題目圖片Base64', '限時(秒)', '填空題答案(多個請用|隔開)', '區分大小寫(true/false)', '選項1', '選項1正確(true/false)', '選項1圖片Base64', '選項2', '選項2正確(true/false)', '選項2圖片Base64', '選項3', '選項3正確(true/false)', '選項3圖片Base64', '選項4', '選項4正確(true/false)', '選項4圖片Base64', '選項5', '選項5正確(true/false)', '選項5圖片Base64', '選項6', '選項6正確(true/false)', '選項6圖片Base64'];
+
+            const downloadFile = (content, filename) => {
+                const blob = new Blob(["\uFEFF" + content], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url; link.setAttribute('download', filename);
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            };
+
+            const downloadTemplate = () => {
+                const sample1 = ['single', '太陽從哪邊升起？', '', '20', '', 'false', '東邊', 'true', '', '西邊', 'false', '', '南邊', 'false', '', '北邊', 'false', ''];
+                const content = [csvHeaders.join(','), sample1.join(',')].join('\n');
+                downloadFile(content, '題庫格式範本.csv');
+            };
+
+            const exportQuestions = () => {
+                if (questions.length === 0) return alert("目前沒有題目可以匯出！");
+                const rows = questions.map(q => {
+                    const fillAnsJoined = (q.fillAnswers || (q.fillAnswer ? [q.fillAnswer] : [])).join('|');
+                    const row = [q.type, `"${q.text.replace(/"/g, '""')}"`, `"${(q.imageBase64 || '').replace(/"/g, '""')}"`, q.timeLimit, `"${fillAnsJoined.replace(/"/g, '""')}"`, q.caseSensitive ? 'true' : 'false'];
+                    if (q.type !== 'fill') {
+                        q.options.forEach(opt => row.push(`"${(opt.text || '').replace(/"/g, '""')}"`, opt.isCorrect ? 'true' : 'false', `"${(opt.imageBase64 || '').replace(/"/g, '""')}"`));
+                    }
+                    return row.join(',');
+                });
+                downloadFile(csvHeaders.join(',') + '\n' + rows.join('\n'), '我的題庫.csv');
+            };
+
+            const importQuestions = (e) => {
+                const files = e.target.files;
+                if (!files || files.length === 0) return;
+                setImportFiles(Array.from(files));
+                e.target.value = null;
+            };
+
+            const processImportFiles = async (mode) => {
+                let allNewQuestions = [];
+                for (const file of importFiles) {
+                    const text = await new Promise(resolve => {
+                        const reader = new FileReader();
+                        reader.onload = (event) => resolve(event.target.result);
+                        reader.readAsText(file);
+                    });
+                    const lines = text.split(/\r?\n/);
+                    const newQuestions = [];
+                    const isOldFormat = lines[0] && lines[0].indexOf('選項1圖片Base64') === -1;
+                    const step = isOldFormat ? 2 : 3;
+
+                    for (let i = 1; i < lines.length; i++) {
+                        if (!lines[i].trim()) continue;
+                        const row = []; let current = ''; let inQuotes = false;
+                        for (let j = 0; j < lines[i].length; j++) {
+                            const char = lines[i][j];
+                            if (char === '"' && lines[i][j+1] === '"') { current += '"'; j++; }
+                            else if (char === '"') inQuotes = !inQuotes;
+                            else if (char === ',' && !inQuotes) { row.push(current); current = ''; }
+                            else current += char;
+                        }
+                        row.push(current);
+
+                        const type = row[0]?.trim() || 'single';
+                        const textStr = row[1]?.trim() || '';
+                        const imageBase64 = row[2]?.trim() || '';
+                        const timeLimit = parseInt(row[3]) || 20;
+                        const fillAnswersRaw = row[4]?.trim() || '';
+                        const caseSensitive = row[5]?.trim().toLowerCase() === 'true';
+                        const fillAnswers = fillAnswersRaw ? fillAnswersRaw.split('|').map(s => s.trim()).filter(Boolean) : [''];
+
+                        if (!textStr && !imageBase64 && type === 'fill' && fillAnswers.every(a => !a)) continue;
+
+                        const options = [];
+                        if (type !== 'fill') {
+                            for (let j = 6; j < row.length; j += step) {
+                                const optText = row[j]?.trim();
+                                const isCorrect = row[j+1]?.trim().toLowerCase() === 'true';
+                                const optImageBase64 = isOldFormat ? '' : (row[j+2]?.trim() || '');
+                                if (optText || optImageBase64) options.push({ id: Date.now().toString() + Math.random(), text: optText || '', isCorrect, imageBase64: optImageBase64 });
+                            }
+                            if (options.length === 0) continue; 
+                        }
+                        newQuestions.push({ id: Date.now().toString() + Math.random(), type, text: textStr, imageBase64, timeLimit, fillAnswers, caseSensitive, options });
+                    }
+                    allNewQuestions = [...allNewQuestions, ...newQuestions];
+                }
+                if (allNewQuestions.length > 0) {
+                    mode === 'replace' ? setQuestions(allNewQuestions) : setQuestions(prev => [...prev, ...allNewQuestions]);
+                    setCustomAlert(`成功匯入 ${allNewQuestions.length} 道題目！`);
+                } else {
+                    setCustomAlert("找不到有效的題目，請檢查格式是否正確。");
+                }
+                setImportFiles(null);
+            };
+
+            const createGame = async () => {
+                if (questions.length === 0) { setCustomAlert('請先在題庫中至少新增一道題目！'); return; }
+                if (isCreating || !user) return;
+                setIsCreating(true);
+                try {
+                    const newGameId = Math.random().toString(36).substr(2, 6).toUpperCase();
+                    await getGameRef(newGameId).set({
+                        pin: newGameId, hostId: user.uid, status: 'lobby', questions: questions, currentQIndex: 0,
+                        mode: gameMode, teamCount: gameMode === 'team' ? teamCount : 0, players: {}, answers: {}, createdAt: Date.now()
+                    });
+                    onGameCreated(newGameId);
+                } catch (error) {
+                    console.error("建立遊戲失敗:", error);
+                    setCustomAlert(`建立遊戲時發生權限或網路錯誤。\n(詳細: ${error.message})`);
+                    setIsCreating(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 p-4 md:p-8 font-sans text-gray-800">
+                    <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
+                        <div className="flex justify-between items-center mb-4 md:mb-8 relative">
+                            <button onClick={onBack} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl transition flex items-center absolute left-0"><ArrowRight className="mr-2 rotate-180 text-lg" /> 返回首頁</button>
+                            <div className="text-center w-full">
+                                <h1 className="text-3xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-2">建立你的問答遊戲</h1>
+                                <p className="text-sm md:text-base text-gray-500">設計題目，邀請朋友挑戰！</p>
+                            </div>
+                        </div>
+
+                        <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-100 mb-6 md:mb-8 flex flex-col gap-4">
+                            <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">選擇遊戲模式</h2>
+                            <div className="flex flex-col sm:flex-row gap-4 sm:gap-8">
+                                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 transition"><input type="radio" value="solo" checked={gameMode === 'solo'} onChange={() => setGameMode('solo')} className="w-6 h-6 text-blue-600" /><span className="font-medium text-gray-700 text-lg md:text-xl">單人比拼模式</span></label>
+                                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 transition"><input type="radio" value="team" checked={gameMode === 'team'} onChange={() => setGameMode('team')} className="w-6 h-6 text-blue-600" /><span className="font-medium text-gray-700 text-lg md:text-xl">組隊模式</span></label>
+                            </div>
+                            {gameMode === 'team' && (
+                                <div className="flex items-center gap-4 mt-2 p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-100">
+                                    <label className="text-blue-800 font-bold text-lg md:text-xl">設定隊伍數量：</label>
+                                    <input type="number" min="2" max="10" value={teamCount} onChange={(e) => setTeamCount(parseInt(e.target.value) || 2)} className="border-2 border-blue-200 rounded-lg px-4 py-2 w-24 text-center font-bold text-xl text-blue-900 focus:outline-none focus:border-blue-500" />
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="grid lg:grid-cols-2 gap-6 md:gap-8">
+                            <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-100">
+                                <div className="flex justify-between items-center mb-6"><h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">{editingId ? <Edit className="mr-2 text-blue-500 text-2xl" /> : <Plus className="mr-2 text-blue-500 text-2xl" />} {editingId ? '編輯題目' : '新增題目'}</h2></div>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="block text-sm md:text-base font-medium text-gray-700 mb-2">題目內容</label>
+                                        <textarea className="w-full p-4 md:p-5 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" rows="3" value={currentQ.text} onChange={e => setCurrentQ({...currentQ, text: e.target.value})} placeholder="例如：圖片中的是哪一種動物？" />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm md:text-base font-medium text-gray-700 mb-2">題目圖片 (選填，從本機上傳)</label>
+                                        <input type="file" accept="image/*" className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" onChange={async e => { const file = e.target.files[0]; if (file) { const base64 = await compressImage(file, 500); setCurrentQ({...currentQ, imageBase64: base64}); } e.target.value = null; }} />
+                                        {currentQ.imageBase64 && (
+                                            <div className="mt-3 relative inline-block border border-gray-200 rounded-lg p-2 bg-gray-50"><img src={currentQ.imageBase64} alt="預覽" className="max-h-40 object-contain rounded" /><button onClick={() => setCurrentQ({...currentQ, imageBase64: ''})} className="absolute -top-3 -right-3 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow transition"><X className="text-sm" /></button></div>
+                                        )}
+                                    </div>
+                                    <div className="flex flex-col sm:flex-row gap-4 md:gap-6">
+                                        <div className="flex-1"><label className="block text-sm md:text-base font-medium text-gray-700 mb-2">題目類型</label><select className="w-full p-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white" value={currentQ.type} onChange={e => { const newType = e.target.value; setCurrentQ({...currentQ, type: newType, options: currentQ.options.map((o, i) => ({ ...o, isCorrect: newType === 'single' ? i === 0 : o.isCorrect })) }); }}><option value="single">單選題</option><option value="multiple">多選題</option><option value="fill">填空題</option></select></div>
+                                        <div className="flex-1"><label className="block text-sm md:text-base font-medium text-gray-700 mb-2">限時 (秒)</label><input type="number" min="5" max="120" className="w-full p-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" value={currentQ.timeLimit} onChange={e => setCurrentQ({...currentQ, timeLimit: parseInt(e.target.value) || 20})} /></div>
+                                    </div>
+
+                                    {currentQ.type === 'fill' ? (
+                                        <div>
+                                            <label className="block text-sm md:text-base font-medium text-gray-700 mb-2">正確答案設定 (可加入多個同義詞/別稱)</label>
+                                            <div className="space-y-3">
+                                                {(currentQ.fillAnswers && currentQ.fillAnswers.length > 0 ? currentQ.fillAnswers : ['']).map((ans, idx) => (
+                                                    <div key={idx} className="flex items-center gap-3">
+                                                        <input type="text" className="flex-1 p-3 md:p-4 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition" placeholder={`可接受的答案 ${idx + 1}`} value={ans} onChange={e => { const newAns = [...(currentQ.fillAnswers || [''])]; newAns[idx] = e.target.value; setCurrentQ({...currentQ, fillAnswers: newAns}); }} />
+                                                        {(currentQ.fillAnswers?.length > 1) && (<button onClick={() => setCurrentQ({...currentQ, fillAnswers: currentQ.fillAnswers.filter((_, i) => i !== idx)})} className="p-3 md:p-4 text-gray-400 hover:text-red-500 transition bg-gray-50 hover:bg-red-50 rounded-lg border border-gray-200 flex-shrink-0" title="移除此答案"><Trash2 className="text-xl" /></button>)}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <button onClick={() => setCurrentQ({...currentQ, fillAnswers: [...(currentQ.fillAnswers || ['']), '']})} className="mt-4 text-base text-blue-600 font-bold hover:text-blue-800 flex items-center"><Plus className="mr-1 text-lg" /> 新增其他可接受的答案</button>
+                                            <div className="flex items-center mt-6 bg-gray-50 p-4 rounded-xl border border-gray-200"><input type="checkbox" id="caseSensitive" checked={currentQ.caseSensitive || false} onChange={e => setCurrentQ({...currentQ, caseSensitive: e.target.checked})} className="w-6 h-6 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer" /><label htmlFor="caseSensitive" className="ml-3 text-base font-medium text-gray-700 cursor-pointer">答案必須區分大小寫</label></div>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <label className="block text-sm md:text-base font-medium text-gray-700 mb-3">選項設定 (勾選為正確答案)</label>
+                                            <div className="space-y-4">
+                                                {currentQ.options.map((opt, index) => (
+                                                    <div key={opt.id} className={`flex flex-col gap-3 p-4 rounded-xl border-2 ${opt.isCorrect ? 'border-green-400 bg-green-50' : 'border-gray-200'}`}>
+                                                        <div className="flex items-center gap-3">
+                                                            <input type={currentQ.type === 'single' ? 'radio' : 'checkbox'} name="correctAnswer" className="w-6 h-6 text-green-600 focus:ring-green-500 cursor-pointer flex-shrink-0" checked={opt.isCorrect} onChange={(e) => updateOption(opt.id, 'isCorrect', e.target.checked)} />
+                                                            <input type="text" className="flex-1 p-3 text-lg bg-white border border-gray-200 rounded-md outline-none focus:border-blue-500 transition" placeholder={`選項 ${String.fromCharCode(65 + index)} 文字 (選填)`} value={opt.text} onChange={e => updateOption(opt.id, 'text', e.target.value)} />
+                                                            <label className="cursor-pointer p-3 bg-gray-100 hover:bg-blue-100 text-gray-500 hover:text-blue-600 rounded-md transition flex-shrink-0" title="加入選項圖片"><ImagePlus className="text-xl" /><input type="file" accept="image/*" className="hidden" onChange={async (e) => { const file = e.target.files[0]; if (file) { const base64 = await compressImage(file, 250); updateOption(opt.id, 'imageBase64', base64); } e.target.value = null; }} /></label>
+                                                            <button onClick={() => removeOption(opt.id)} className="p-3 text-gray-400 hover:text-red-500 transition flex-shrink-0"><Trash2 className="text-xl" /></button>
+                                                        </div>
+                                                        {opt.imageBase64 && (<div className="relative inline-block ml-10 border border-gray-200 rounded p-2 bg-white w-max"><img src={opt.imageBase64} className="h-20 object-contain rounded" alt="預覽" /><button onClick={() => updateOption(opt.id, 'imageBase64', '')} className="absolute -top-3 -right-3 bg-red-500 hover:bg-red-600 text-white rounded-full p-1.5 shadow transition"><X className="text-sm" /></button></div>)}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                            <button onClick={addOption} className="mt-4 text-base text-blue-600 font-bold hover:text-blue-800 flex items-center"><Plus className="mr-1 text-lg" /> 加入更多選項</button>
+                                        </div>
+                                    )}
+
+                                    <div className="flex gap-3 pt-4">
+                                        {editingId && <button onClick={cancelEdit} className="w-1/3 py-4 bg-gray-200 hover:bg-gray-300 text-gray-700 text-lg font-bold rounded-xl transition">取消</button>}
+                                        <button onClick={saveQuestion} className={`${editingId ? 'w-2/3 bg-blue-600 hover:bg-blue-700' : 'w-full bg-gray-800 hover:bg-gray-900'} py-4 text-white text-lg font-bold rounded-xl transition shadow-md`}>{editingId ? '更新題目' : '儲存題目至題庫'}</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="bg-white p-6 md:p-8 rounded-2xl shadow-xl border border-gray-100 flex flex-col">
+                                <div className="flex justify-between items-center mb-6">
+                                    <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center"><CheckCircle2 className="mr-2 text-green-500 text-2xl" /> 已建立題庫 ({questions.length})</h2>
+                                    <div className="flex gap-3 relative">
+                                        <button onClick={downloadTemplate} title="下載 Excel/CSV 格式範本" className="p-3 text-gray-500 hover:text-blue-600 bg-gray-100 hover:bg-blue-50 rounded-xl transition"><FileText className="text-lg" /></button>
+                                        <button onClick={() => fileInputRef.current.click()} title="從 Excel 匯入" className="p-3 text-gray-500 hover:text-green-600 bg-gray-100 hover:bg-green-50 rounded-xl transition"><Upload className="text-lg" /></button>
+                                        <input type="file" accept=".csv" multiple ref={fileInputRef} onChange={importQuestions} className="hidden" />
+                                        <button onClick={exportQuestions} title="將題庫匯出至 Excel" className="p-3 text-gray-500 hover:text-purple-600 bg-gray-100 hover:bg-purple-50 rounded-xl transition"><Download className="text-lg" /></button>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto space-y-4 mb-6 min-h-[300px] lg:max-h-[600px] pr-2 custom-scrollbar">
+                                    {questions.length === 0 ? (
+                                        <div className="h-full flex flex-col items-center justify-center text-gray-400 italic text-lg">尚未加入任何題目</div>
+                                    ) : (
+                                        questions.map((q, i) => (
+                                            <div key={q.id} onClick={() => { setEditingId(q.id); setCurrentQ(JSON.parse(JSON.stringify(q))); }} className={`p-5 md:p-6 border-2 cursor-pointer relative group transition-all rounded-2xl ${editingId === q.id ? 'border-blue-400 bg-blue-50 shadow-md ring-2 ring-blue-400' : 'border-gray-100 bg-gray-50 hover:border-blue-300 hover:bg-blue-50/50'}`}>
+                                                <span className="absolute top-3 right-3 text-sm font-bold px-3 py-1 bg-blue-100 text-blue-800 rounded-full">{q.type === 'single' ? '單選' : q.type === 'multiple' ? '多選' : '填空'}</span>
+                                                <h3 className="text-lg md:text-xl font-bold text-gray-800 mb-3 pr-16 leading-relaxed">Q{i + 1}. {q.text || '(圖片題)'}</h3>
+                                                {q.imageBase64 && <div className="text-sm text-blue-500 mb-3 font-bold flex items-center">📎 包含題目圖片</div>}
+                                                <div className="text-base text-gray-600 flex flex-col gap-2">
+                                                    {q.type === 'fill' ? (
+                                                        <div className="text-green-700 font-bold break-all bg-green-50 p-2 rounded">正確答案: {(q.fillAnswers || []).join(' / ')} {q.caseSensitive && <span className="text-xs bg-green-200 text-green-900 px-2 py-0.5 rounded ml-2 whitespace-nowrap">區分大小寫</span>}</div>
+                                                    ) : (
+                                                        q.options.map((o, oi) => (
+                                                            <div key={oi} className={`flex items-center gap-2 ${o.isCorrect ? 'text-green-700 font-bold bg-green-50 p-2 rounded' : 'p-2'}`}>
+                                                                <span className="truncate max-w-[250px] md:max-w-[350px]">{String.fromCharCode(65 + oi)}. {o.text || '(圖片選項)'} {o.isCorrect && '✓'}</span>
+                                                                {o.imageBase64 && <span className="text-xs bg-gray-200 text-gray-500 px-2 py-1 rounded flex-shrink-0 font-bold">圖</span>}
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                                <div className={`absolute bottom-3 right-3 flex gap-3 transition ${editingId === q.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                    <button onClick={(e) => { e.stopPropagation(); const duplicatedQ = JSON.parse(JSON.stringify(q)); duplicatedQ.id = Date.now().toString() + Math.random(); setQuestions([...questions, duplicatedQ]); setEditingId(duplicatedQ.id); setCurrentQ(duplicatedQ); }} className="p-2.5 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-xl transition" title="複製題目"><Copy className="text-base" /></button>
+                                                    <button onClick={(e) => { e.stopPropagation(); setQuestions(questions.filter(xq => xq.id !== q.id)); if (editingId === q.id) cancelEdit(); }} className="p-2.5 bg-red-100 text-red-600 hover:bg-red-200 rounded-xl transition" title="刪除題目"><Trash2 className="text-base" /></button>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
+                                </div>
+
+                                <button onClick={createGame} disabled={questions.length === 0 || isCreating} className={`w-full py-5 md:py-6 font-black rounded-2xl flex justify-center items-center text-xl md:text-2xl transition shadow-xl ${questions.length > 0 && !isCreating ? 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white transform hover:-translate-y-1' : 'bg-gray-200 text-gray-400 cursor-not-allowed'}`}>
+                                    {isCreating ? <><Clock className="animate-spin mr-3 text-2xl" /> 正在生成房間...</> : <><Play className="mr-3 text-2xl" /> 開始遊戲並生成連結</>}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {importFiles && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white p-8 md:p-10 rounded-3xl shadow-2xl max-w-lg w-full animate-fade-in-up">
+                                <h3 className="text-3xl font-black text-gray-800 mb-4">匯入題目</h3>
+                                <p className="mb-8 text-gray-600 font-medium text-lg">已選擇 {importFiles.length} 份檔案。請問要如何處理這些題目？</p>
+                                <div className="flex flex-col gap-4">
+                                    <button onClick={() => processImportFiles('replace')} className="w-full py-5 bg-red-500 hover:bg-red-600 text-white text-xl font-bold rounded-2xl shadow-lg transform hover:-translate-y-0.5 transition flex items-center justify-center"><Trash2 className="mr-3 text-2xl" /> 替換並清空現有題庫</button>
+                                    <button onClick={() => processImportFiles('append')} className="w-full py-5 bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold rounded-2xl shadow-lg transform hover:-translate-y-0.5 transition flex items-center justify-center"><Plus className="mr-3 text-2xl" /> 直接加入現有題庫</button>
+                                </div>
+                                <button onClick={() => setImportFiles(null)} className="mt-6 w-full py-4 text-gray-500 text-xl font-bold hover:bg-gray-100 rounded-2xl transition">取消</button>
+                            </div>
+                        </div>
+                    )}
+
+                    {customAlert && (
+                        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+                            <div className="bg-white p-8 md:p-10 rounded-3xl shadow-2xl max-w-md w-full text-center animate-fade-in-up">
+                                <h3 className="text-2xl md:text-3xl font-bold text-gray-800 mb-8">{customAlert}</h3>
+                                <button onClick={() => setCustomAlert(null)} className="w-full py-4 md:py-5 bg-blue-600 hover:bg-blue-700 text-white text-xl font-bold rounded-2xl shadow-md transition">確定</button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function JoinGame({ user, initialGameId, onSetGameId, onNavigateCreate, gameState }) {
+            const [nickname, setNickname] = useState('');
+            const [pin, setPin] = useState(initialGameId || '');
+            const [isJoining, setIsJoining] = useState(false);
+
+            const handleJoin = async (e) => {
+                e.preventDefault();
+                if (!nickname.trim() || !pin.trim() || isJoining) return;
+
+                setIsJoining(true);
+                try {
+                    const targetGameId = pin.trim().toUpperCase();
+                    const gameRef = getGameRef(targetGameId);
+
+                    const gameSnap = await gameRef.get();
+                    if (!gameSnap.exists) {
+                        alert("找不到此遊戲房間代碼，請確認後再試！");
+                        setIsJoining(false); 
+                        return;
+                    }
+
+                    const gameData = gameSnap.data();
+                    let assignedTeam = null;
+                    
+                    if (gameData.mode === 'team') {
+                        const teamTotals = {};
+                        for (let i = 1; i <= (gameData.teamCount || 2); i++) teamTotals[`隊伍${i}`] = 0;
+                        
+                        Object.values(gameData.players || {}).forEach(p => {
+                            if (p.team && teamTotals[p.team] !== undefined) teamTotals[p.team]++;
+                        });
+                        assignedTeam = Object.keys(teamTotals).reduce((a, b) => teamTotals[a] < teamTotals[b] ? a : b);
+                    }
+
+                    const newPlayerData = { nickname: nickname.trim(), score: 0, joinedAt: Date.now() };
+                    if (assignedTeam) newPlayerData.team = assignedTeam;
+
+                    await gameRef.update({ [`players.${user.uid}`]: newPlayerData });
+
+                    if (!initialGameId) onSetGameId(targetGameId);
+                } catch (error) {
+                    console.error("Join Game Error:", error);
+                    alert("加入遊戲時發生連線錯誤，請稍後重試。");
+                    setIsJoining(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 md:p-8 text-white">
+                    <div className="bg-white max-w-md md:max-w-lg w-full p-8 md:p-12 rounded-3xl shadow-2xl text-gray-800">
+                        <div className="text-center mb-8 md:mb-10">
+                            <div className="inline-flex items-center justify-center w-20 h-20 md:w-24 md:h-24 rounded-full bg-blue-100 text-blue-600 mb-6"><Trophy className="text-4xl md:text-5xl" /></div>
+                            <h1 className="text-3xl md:text-4xl font-extrabold text-gray-800">準備加入遊戲！</h1>
+                            {gameState ? <p className="text-gray-500 mt-3 md:text-lg">目前已有 {Object.keys(gameState.players || {}).length} 位玩家在等待室</p> : <p className="text-gray-500 mt-3 md:text-lg">請輸入代碼與暱稱加入遊戲</p>}
+                        </div>
+
+                        <form onSubmit={handleJoin} className="space-y-6 md:space-y-8">
+                            {!initialGameId && (
+                                <div>
+                                    <label className="block text-base md:text-lg font-bold text-gray-700 mb-3">輸入遊戲房間代碼 (PIN)</label>
+                                    <input type="text" className="w-full px-5 py-4 md:py-5 text-xl md:text-2xl border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:ring-0 outline-none text-center font-bold text-gray-800 placeholder-gray-300 transition uppercase tracking-widest bg-white" placeholder="例如：123456" value={pin} onChange={e => setPin(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
+                                </div>
+                            )}
+                            <div>
+                                <label className="block text-base md:text-lg font-bold text-gray-700 mb-3">輸入你的專屬暱稱</label>
+                                <input type="text" maxLength="12" className="w-full px-5 py-4 md:py-5 text-xl md:text-2xl border-2 border-gray-200 rounded-2xl focus:border-blue-500 focus:ring-0 outline-none text-center font-bold text-gray-800 placeholder-gray-300 transition bg-white" placeholder="例如：遊戲大師" value={nickname} onChange={e => setNickname(e.target.value)} autoFocus={!!initialGameId} />
+                            </div>
+                            <button type="submit" disabled={!nickname.trim() || !pin.trim() || isJoining} className="w-full py-5 md:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xl md:text-2xl font-bold rounded-2xl shadow-xl transform hover:-translate-y-1 transition disabled:opacity-50 disabled:transform-none disabled:cursor-not-allowed">
+                                {isJoining ? <span className="flex items-center justify-center"><Clock className="animate-spin mr-3 text-2xl" /> 加入中...</span> : "確認加入"}
+                            </button>
+                        </form>
+                    </div>
+                    
+                    {!initialGameId && (
+                        <div className="mt-10 text-center">
+                            <p className="text-gray-400 mb-3 md:text-lg">我是主持人？</p>
+                            <button onClick={onNavigateCreate} className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white text-lg rounded-2xl font-bold transition border border-white/20">建立新遊戲 / 題庫</button>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function Lobby({ user, gameState, gameId }) {
+            const joinUrl = `${window.location.origin}${window.location.pathname}?gameId=${gameId}`;
+            
+            const playersStr = JSON.stringify(gameState.players || {});
+            const playersArray = useMemo(() => Object.entries(gameState.players || {}).map(([uid, data]) => ({ uid, ...data })), [playersStr]);
+            
+            const [editingNickname, setEditingNickname] = useState(false);
+            const [newNickname, setNewNickname] = useState('');
+            const [dragOverTeam, setDragOverTeam] = useState(null);
+            const [isStarting, setIsStarting] = useState(false);
+            const isHost = user.uid === gameState.hostId;
+            const isPlayer = Boolean(gameState.players?.[user.uid]);
+            const [hostNickname, setHostNickname] = useState('');
+            const [isJoiningHost, setIsJoiningHost] = useState(false);
+
+            const hasPreloaded = useRef(false);
+            useEffect(() => {
+                if (hasPreloaded.current || !gameState?.questions) return;
+                hasPreloaded.current = true;
+                
+                gameState.questions.forEach(q => {
+                    if (q.imageBase64) { const img = new Image(); img.src = q.imageBase64; }
+                    if (q.options) {
+                        q.options.forEach(opt => {
+                            if (opt.imageBase64) { const img = new Image(); img.src = opt.imageBase64; }
+                        });
+                    }
+                });
+            }, [gameState?.questions]);
+
+            useEffect(() => {
+                if (!isHost || gameState.mode !== 'team') return;
+                
+                const timeoutId = setTimeout(() => {
+                    const updates = {};
+                    let changed = false;
+                    const teamTotals = {};
+                    for (let i = 1; i <= gameState.teamCount; i++) teamTotals[`隊伍${i}`] = 0;
+
+                    playersArray.forEach(p => { if (p.team) teamTotals[p.team]++; });
+
+                    Object.entries(gameState.players || {}).forEach(([uid, p]) => {
+                        if (!p.team) {
+                            const minTeam = Object.keys(teamTotals).reduce((a, b) => teamTotals[a] < teamTotals[b] ? a : b);
+                            updates[`players.${uid}.team`] = minTeam;
+                            teamTotals[minTeam]++;
+                            changed = true;
+                        }
+                    });
+
+                    if (changed) {
+                        getGameRef(gameId).update(updates);
+                    }
+                }, 800); 
+
+                return () => clearTimeout(timeoutId);
+            }, [playersStr, isHost, gameState.mode, gameId, gameState.teamCount]); 
+
+            const changePlayerTeam = async (uid, newTeam) => {
+                await getGameRef(gameId).update({ [`players.${uid}.team`]: newTeam });
+            };
+
+            const handleDragStart = (e, uid) => e.dataTransfer.setData('text/plain', uid);
+            const handleDragOver = (e, teamName) => { e.preventDefault(); if (dragOverTeam !== teamName) setDragOverTeam(teamName); };
+            const handleDragLeave = (e) => { e.preventDefault(); setDragOverTeam(null); };
+            const handleDrop = async (e, teamName) => {
+                e.preventDefault(); setDragOverTeam(null);
+                const uid = e.dataTransfer.getData('text/plain');
+                if (uid && gameState.players[uid]?.team !== teamName) await changePlayerTeam(uid, teamName);
+            };
+            
+            const handleHostJoin = async () => {
+                if (!hostNickname.trim() || isJoiningHost) return;
+                setIsJoiningHost(true);
+                try {
+                    const gameRef = getGameRef(gameId);
+                    let assignedTeam = null;
+                    if (gameState.mode === 'team') {
+                        const teamTotals = {};
+                        for (let i = 1; i <= (gameState.teamCount || 2); i++) teamTotals[`隊伍${i}`] = 0;
+                        Object.values(gameState.players || {}).forEach(p => {
+                            if (p.team && teamTotals[p.team] !== undefined) teamTotals[p.team]++;
+                        });
+                        assignedTeam = Object.keys(teamTotals).reduce((a, b) => teamTotals[a] < teamTotals[b] ? a : b);
+                    }
+                    const newPlayerData = { nickname: hostNickname.trim(), score: 0, joinedAt: Date.now() };
+                    if (assignedTeam) newPlayerData.team = assignedTeam;
+                    await gameRef.update({ [`players.${user.uid}`]: newPlayerData });
+                } catch (error) {
+                    alert("加入遊戲失敗，請重試");
+                } finally {
+                    setIsJoiningHost(false);
+                }
+            };
+
+            const saveNickname = async () => {
+                if (newNickname.trim() && newNickname.trim() !== gameState.players[user.uid].nickname) {
+                    await getGameRef(gameId).update({ [`players.${user.uid}.nickname`]: newNickname.trim() });
+                }
+                setEditingNickname(false);
+            };
+
+            const startGame = async () => {
+                if (playersArray.length === 0) return alert("至少需要一位玩家才能開始！");
+                if (isStarting) return; setIsStarting(true);
+                
+                await getGameRef(gameId).update({
+                    status: 'starting_countdown', countdownDeadline: Date.now() + 3000
+                });
+            };
+
+            const copyLink = () => {
+                const textArea = document.createElement("textarea"); textArea.value = joinUrl; document.body.appendChild(textArea); textArea.select();
+                try { document.execCommand('copy'); alert('連結已複製！'); } catch (err) {}
+                document.body.removeChild(textArea);
+            };
+
+            if (!isHost) {
+                return (
+                    <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 md:p-8 relative overflow-hidden text-white">
+                        <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-blue-600/20 rounded-full blur-[100px] pointer-events-none"></div>
+                        <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-indigo-600/20 rounded-full blur-[100px] pointer-events-none"></div>
+
+                        <div className="bg-white/10 backdrop-blur-xl rounded-[3rem] shadow-2xl p-10 md:p-16 text-center border border-white/20 animate-fade-in-up w-full max-w-md z-10">
+                            <div className="relative w-24 h-24 md:w-32 md:h-32 mx-auto mb-8">
+                                <div className="absolute inset-0 border-4 md:border-8 border-blue-500/20 rounded-full"></div>
+                                <div className="absolute inset-0 border-4 md:border-8 border-blue-400 rounded-full border-t-transparent animate-spin"></div>
+                                <Music className="absolute inset-0 m-auto text-blue-400 animate-pulse text-4xl" />
+                            </div>
+                            
+                            <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">等待遊戲開始</h2>
+                            <p className="text-lg md:text-xl text-blue-200/80 mb-10 font-medium">請注意看主持人的大螢幕！<br/><span className="text-sm">圖片與資源已在背景載入中...</span></p>
+                            
+                            <div className="bg-black/30 rounded-2xl p-6 border border-white/10 shadow-inner text-gray-800">
+                                <p className="text-sm md:text-base text-gray-400 font-bold mb-2 uppercase tracking-widest">你的參賽身分</p>
+                                <p className="text-3xl md:text-4xl font-black text-white">{gameState.players[user.uid]?.nickname}</p>
+                                {gameState.mode === 'team' && (
+                                    <div className="mt-4 inline-block px-5 py-2 bg-blue-500/30 border border-blue-400 rounded-full text-blue-100 font-bold text-lg shadow-lg">
+                                        {gameState.players[user.uid]?.team}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-900 py-8 md:py-12 px-4 md:px-8 font-sans flex flex-col items-center relative">
+                    <div className="w-full max-w-7xl grid md:grid-cols-12 gap-6 md:gap-8">
+                        <div className="md:col-span-5 lg:col-span-4 space-y-6 md:space-y-8">
+                            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-xl text-center text-gray-800">
+                                <h2 className="text-lg md:text-xl font-bold text-gray-500 mb-2 md:mb-4 uppercase tracking-wider">遊戲房間代碼 (PIN)</h2>
+                                <div className="text-5xl md:text-6xl lg:text-7xl font-black tracking-widest text-blue-600 mb-6 md:mb-8 bg-blue-50 py-4 md:py-6 rounded-2xl border-2 border-blue-200 inline-block w-full">{gameState.pin || gameId}</div>
+                                <div className="w-full h-px bg-gray-200 mb-6 md:mb-8"></div>
+                                <h3 className="text-base md:text-lg font-bold text-gray-800 mb-4">或掃描 QR Code 加入</h3>
+                                <div className="bg-gray-100 p-4 md:p-6 rounded-3xl inline-block mb-4 md:mb-6 border-2 border-dashed border-gray-300"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(joinUrl)}&margin=10`} alt="QR Code" className="w-40 h-40 md:w-48 md:h-48 lg:w-56 lg:h-56 rounded-xl mx-auto object-contain" /></div>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <input type="text" readOnly value={joinUrl} className="flex-1 bg-gray-100 border-none rounded-xl text-sm md:text-base p-3 md:p-4 outline-none text-gray-600" />
+                                    <button onClick={copyLink} className="p-3 md:p-4 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition"><Copy className="text-xl" /></button>
+                                </div>
+                            </div>
+                            {isHost && (
+                                <button onClick={startGame} disabled={isStarting} className="w-full py-5 md:py-6 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white text-xl md:text-2xl font-extrabold rounded-3xl shadow-2xl transform hover:-translate-y-1 transition flex items-center justify-center animate-pulse disabled:opacity-50 disabled:transform-none">
+                                    {isStarting ? <Clock className="animate-spin mr-3 text-2xl" /> : <Play className="mr-3 text-2xl" />} {isStarting ? '載入中...' : '所有人準備好即可開始'}
+                                </button>
+                            )}
+                        </div>
+
+                        <div className="md:col-span-7 lg:col-span-8 bg-white/10 backdrop-blur-md rounded-3xl p-6 md:p-10 border border-white/20 flex flex-col min-h-[50vh]">
+                            {isHost && !isPlayer && (
+                                <div className="bg-black/20 rounded-3xl p-6 md:p-8 mb-6 md:mb-8 border border-white/10 animate-fade-in-up">
+                                    <h3 className="text-xl md:text-2xl font-black text-yellow-400 mb-2">您要一起參與答題嗎？</h3>
+                                    <p className="text-white/80 mb-5 text-sm md:text-base font-medium">身為主持人，您目前僅負責控制遊戲流程。若想親自下場比賽，請輸入暱稱加入：</p>
+                                    <div className="flex flex-col sm:flex-row gap-3">
+                                        <input type="text" maxLength="12" className="flex-1 px-5 py-3 md:py-4 rounded-xl md:rounded-2xl text-gray-800 text-lg font-bold outline-none focus:ring-4 focus:ring-blue-400 transition shadow-inner bg-white" placeholder="輸入您的專屬暱稱..." value={hostNickname} onChange={e => setHostNickname(e.target.value)} />
+                                        <button onClick={handleHostJoin} disabled={!hostNickname.trim() || isJoiningHost} className="px-6 py-3 md:py-4 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white font-bold text-lg rounded-xl md:rounded-2xl shadow-lg transition disabled:opacity-50 flex items-center justify-center whitespace-nowrap">{isJoiningHost ? <Clock className="animate-spin mr-2 text-xl" /> : <Plus className="mr-2 text-xl" />} 成為參賽者</button>
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex items-center justify-between mb-6 md:mb-8">
+                                <h2 className="text-2xl md:text-3xl font-bold text-white flex items-center"><Users className="mr-3 md:mr-4 text-blue-400 text-3xl md:text-4xl" /> 已加入玩家</h2>
+                                <span className="px-5 py-2 bg-white/20 rounded-full text-white font-bold text-lg md:text-xl">{playersArray.length} 人</span>
+                            </div>
+
+                            {playersArray.length === 0 ? (
+                                <div className="flex-1 flex items-center justify-center text-white/50 italic text-xl md:text-2xl">等待玩家加入中...</div>
+                            ) : (
+                                <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
+                                    {gameState.mode === 'team' ? (
+                                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+                                            {Array.from({ length: gameState.teamCount }).map((_, i) => {
+                                                const teamName = `隊伍${i + 1}`;
+                                                const teamMembers = playersArray.filter(p => p.team === teamName);
+                                                return (
+                                                    <div key={teamName} className={`bg-white/10 backdrop-blur-md rounded-3xl shadow-lg p-5 md:p-6 border-t-4 transition-all duration-200 ${dragOverTeam === teamName ? 'border-yellow-400 bg-white/20 scale-[1.02]' : 'border-blue-400'}`} onDragOver={(e) => isHost && handleDragOver(e, teamName)} onDragLeave={isHost ? handleDragLeave : undefined} onDrop={(e) => isHost && handleDrop(e, teamName)}>
+                                                        <h3 className="font-bold text-xl md:text-2xl text-white mb-4 md:mb-5">{teamName} ({teamMembers.length} 人)</h3>
+                                                        <div className="space-y-3 min-h-[80px]">
+                                                            {teamMembers.map(p => {
+                                                                const isMe = p.uid === user.uid;
+                                                                return (
+                                                                    <div key={p.uid} draggable={isHost} onDragStart={(e) => isHost && handleDragStart(e, p.uid)} className={`flex items-center justify-between bg-black/20 px-4 py-3 md:py-4 rounded-xl transition-colors ${isMe ? 'border border-blue-400 shadow-[0_0_10px_rgba(59,130,246,0.3)]' : ''} ${isHost ? 'cursor-grab active:cursor-grabbing hover:bg-black/40' : ''}`}>
+                                                                        <div className="flex-1 flex items-center overflow-hidden pr-2">
+                                                                            {isHost && <GripVertical className="text-gray-400 mr-2 flex-shrink-0 text-lg" />}
+                                                                            {isMe && editingNickname ? (
+                                                                                <input type="text" autoFocus className="w-full bg-transparent border-b-2 border-white/50 focus:border-white outline-none font-bold text-lg md:text-xl text-white placeholder-white/50" value={newNickname} onChange={e => setNewNickname(e.target.value)} onBlur={saveNickname} onKeyDown={e => e.key === 'Enter' && saveNickname()} maxLength="12" />
+                                                                            ) : (
+                                                                                <span className={`text-lg md:text-xl text-white font-bold truncate ${isMe ? 'cursor-pointer hover:text-blue-200 flex items-center gap-2' : ''}`} onClick={() => { if (isMe) { setNewNickname(p.nickname); setEditingNickname(true); } }}>{p.nickname} {isMe && <Edit className="opacity-50 flex-shrink-0 text-base" />}</span>
+                                                                            )}
+                                                                        </div>
+                                                                        {isHost && (
+                                                                            <select value={p.team || teamName} onChange={(e) => changePlayerTeam(p.uid, e.target.value)} className="text-sm md:text-base font-bold bg-white/90 text-gray-800 rounded-lg px-2 py-1 md:py-2 outline-none flex-shrink-0 cursor-pointer shadow-sm">
+                                                                                {Array.from({ length: gameState.teamCount }).map((_, j) => <option key={j} value={`隊伍${j + 1}`}>移至隊伍{j + 1}</option>)}
+                                                                            </select>
+                                                                        )}
+                                                                    </div>
+                                                                )
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+                                            {playersArray.map((p) => {
+                                                const isMe = p.uid === user.uid;
+                                                return (
+                                                    <div key={p.uid} className="bg-white/20 text-white py-4 md:py-5 px-4 rounded-2xl font-bold text-lg md:text-xl text-center truncate shadow-sm border border-white/10 animate-fade-in-up relative group">
+                                                        {isMe && editingNickname ? (
+                                                            <input type="text" autoFocus className="w-full bg-transparent border-b-2 border-white/50 focus:border-white text-center outline-none font-bold placeholder-white/50" value={newNickname} onChange={e => setNewNickname(e.target.value)} onBlur={saveNickname} onKeyDown={e => e.key === 'Enter' && saveNickname()} maxLength="12" />
+                                                        ) : (
+                                                            <span className={isMe ? "cursor-pointer hover:text-blue-200 transition flex items-center justify-center gap-2 w-full" : "w-full flex items-center justify-center"} onClick={() => { if (isMe) { setNewNickname(p.nickname); setEditingNickname(true); } }}>
+                                                                <span className="truncate">{p.nickname}</span>
+                                                                {isMe && <Edit className="opacity-50 group-hover:opacity-100 flex-shrink-0 text-base" />}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function StartingCountdown({ gameState }) {
+            const [count, setCount] = useState(3);
+
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    const remaining = Math.max(0, Math.ceil((gameState.countdownDeadline - Date.now()) / 1000));
+                    setCount(prev => prev !== remaining ? remaining : prev);
+                }, 250);
+                return () => clearInterval(timer);
+            }, [gameState.countdownDeadline]);
+
+            return (
+                <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4">
+                    <div className="text-center text-white animate-fade-in-up">
+                        <h2 className="text-3xl md:text-5xl text-blue-400 font-bold mb-8 md:mb-12 uppercase tracking-widest drop-shadow-md">遊戲即將開始</h2>
+                        <div className="w-64 h-64 md:w-80 md:h-80 mx-auto rounded-full border-[16px] border-blue-500 flex items-center justify-center text-8xl md:text-[150px] font-black animate-pulse shadow-[0_0_60px_rgba(59,130,246,0.8)] text-white bg-blue-600/20">
+                            {count > 0 ? count : 'GO!'}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const optionColors = [
+            { base: 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300', selected: 'border-blue-500 bg-blue-100 text-blue-900 shadow-lg shadow-blue-200 transform scale-[1.02]' },
+            { base: 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300', selected: 'border-amber-500 bg-amber-100 text-amber-900 shadow-lg shadow-amber-200 transform scale-[1.02]' },
+            { base: 'bg-violet-50 border-violet-200 text-violet-700 hover:bg-violet-100 hover:border-violet-300', selected: 'border-violet-500 bg-violet-100 text-violet-900 shadow-lg shadow-violet-200 transform scale-[1.02]' },
+            { base: 'bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100 hover:border-cyan-300', selected: 'border-cyan-500 bg-cyan-100 text-cyan-900 shadow-lg shadow-cyan-200 transform scale-[1.02]' },
+            { base: 'bg-fuchsia-50 border-fuchsia-200 text-fuchsia-700 hover:bg-fuchsia-100 hover:border-fuchsia-300', selected: 'border-fuchsia-500 bg-fuchsia-100 text-fuchsia-900 shadow-lg shadow-fuchsia-200 transform scale-[1.02]' },
+            { base: 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100 hover:border-orange-300', selected: 'border-orange-500 bg-orange-100 text-orange-900 shadow-lg shadow-orange-200 transform scale-[1.02]' }
+        ];
+
+        function QuestionPreview({ gameState }) {
+            const qIndex = gameState.currentQIndex;
+            const currentQ = gameState.questions?.[qIndex] || {};
+            const [timeLeft, setTimeLeft] = useState(5);
+
+            useEffect(() => {
+                const timer = setInterval(() => {
+                    const remaining = Math.max(0, Math.ceil((gameState.previewDeadline - Date.now()) / 1000));
+                    setTimeLeft(prev => prev !== remaining ? remaining : prev);
+                }, 250);
+                return () => clearInterval(timer);
+            }, [gameState.previewDeadline]);
+
+            if (!currentQ) return null;
+
+            return (
+                <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 md:p-8">
+                    <div className="text-center text-white mb-8 animate-fade-in-up w-full max-w-4xl">
+                        <h2 className="text-3xl md:text-4xl text-blue-400 font-bold mb-4 uppercase tracking-widest">是時候大展身手了！</h2>
+                        <h1 className="text-6xl md:text-7xl font-black mb-8 md:mb-12">第 {qIndex + 1} 題</h1>
+                        <div className="bg-white rounded-[2rem] p-10 md:p-16 shadow-2xl w-full border-4 border-blue-500 transform transition-all duration-500 hover:scale-[1.02]">
+                            <h2 className="text-4xl md:text-5xl lg:text-6xl font-black text-gray-800 leading-tight">{currentQ.text}</h2>
+                            {currentQ.imageBase64 && (
+                                <div className="mt-10 flex justify-center bg-gray-50 rounded-3xl p-6 border border-gray-100">
+                                    <img src={currentQ.imageBase64} alt="題目圖片" className="max-h-72 md:max-h-96 object-contain rounded-2xl shadow-sm" />
+                                </div>
+                            )}
+                        </div>
+                        <div className="mt-16 flex justify-center items-center">
+                            <div className="w-32 h-32 md:w-40 md:h-40 rounded-full border-8 md:border-[12px] border-blue-500 flex items-center justify-center text-6xl md:text-7xl font-black animate-pulse shadow-[0_0_30px_rgba(59,130,246,0.6)] text-blue-400 bg-gray-800">
+                                {timeLeft}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Gameplay({ user, gameState, gameId }) {
+            const qIndex = gameState.currentQIndex;
+            const currentQ = gameState.questions?.[qIndex] || {};
+            const totalQ = gameState.questions?.length || 0;
+            const isHost = user?.uid === gameState.hostId;
+            const isPlayer = Boolean(gameState.players?.[user?.uid]);
+            
+            const totalPlayers = Object.keys(gameState.players || {}).length;
+            const answeredCount = Object.keys(gameState.answers?.[qIndex] || {}).length;
+            
+            const [timeLeft, setTimeLeft] = useState(currentQ.timeLimit || 20);
+            const [selectedOptions, setSelectedOptions] = useState([]);
+            const [textAnswer, setTextAnswer] = useState('');
+            const [hasSubmitted, setHasSubmitted] = useState(false);
+            const [isEnding, setIsEnding] = useState(false);
+
+            useEffect(() => { setIsEnding(false); }, [qIndex]);
+
+            const selectedOptionsRef = useRef(selectedOptions);
+            const textAnswerRef = useRef(textAnswer);
+
+            useEffect(() => {
+                selectedOptionsRef.current = selectedOptions;
+                textAnswerRef.current = textAnswer;
+            }, [selectedOptions, textAnswer]);
+
+            useEffect(() => {
+                if (!gameState.questions?.[qIndex]) return;
+                const ans = gameState.answers?.[qIndex]?.[user.uid];
+                if (ans) {
+                    setHasSubmitted(true);
+                    setSelectedOptions(ans.options || []);
+                    setTextAnswer(ans.textAnswer || '');
+                } else {
+                    setHasSubmitted(false);
+                    setSelectedOptions([]);
+                    setTextAnswer('');
+                }
+            }, [qIndex, gameState.answers, gameState.questions, user.uid]);
+
+            useEffect(() => {
+                if (!gameState.questions?.[qIndex]) return;
+                const timer = setInterval(() => {
+                    const remaining = Math.max(0, Math.ceil((gameState.deadline - Date.now()) / 1000));
+                    setTimeLeft(prev => prev !== remaining ? remaining : prev);
+                    if (remaining <= 0 && !hasSubmitted) {
+                        submitAnswer(selectedOptionsRef.current, textAnswerRef.current, 0);
+                    }
+                }, 250);
+                return () => clearInterval(timer);
+            }, [gameState.deadline, hasSubmitted, qIndex, gameState.questions]); 
+
+            if (!currentQ.type) {
+                return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl md:text-2xl"><Clock className="animate-spin mr-3" /> 載入題目資料中...</div>;
+            }
+
+            const toggleOption = (optId) => {
+                if (hasSubmitted) return;
+                if (currentQ.type === 'single') setSelectedOptions([optId]);
+                else setSelectedOptions(prev => prev.includes(optId) ? prev.filter(id => id !== optId) : [...prev, optId]);
+            };
+
+            const submitAnswer = async (optionsToSubmit = selectedOptions, textToSubmit = textAnswer, forceTime) => {
+                if (hasSubmitted) return;
+                setHasSubmitted(true);
+                
+                const finalTimeLeft = forceTime !== undefined ? forceTime : timeLeft;
+                const respTime = (currentQ.timeLimit || 20) - finalTimeLeft;
+
+                await getGameRef(gameId).update({
+                    [`answers.${qIndex}.${user.uid}`]: { 
+                        options: optionsToSubmit, 
+                        textAnswer: textToSubmit.trim(), 
+                        timestamp: Date.now(),
+                        timeRemaining: finalTimeLeft,
+                        responseTime: respTime
+                    }
+                });
+            };
+
+            const progressPct = (timeLeft / (currentQ.timeLimit || 20)) * 100;
+            const isTimeLow = timeLeft <= 5;
+
+            return (
+                <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4 md:p-8">
+                    <div className="w-full max-w-4xl">
+                        <div className="flex justify-between items-center mb-6 md:mb-8 text-white">
+                            <div className="bg-white/10 px-5 py-2.5 rounded-full font-bold text-base md:text-lg tracking-widest uppercase">題目 {qIndex + 1} / {totalQ}</div>
+                            {isPlayer && (
+                                <div className="bg-white/10 px-5 py-2.5 rounded-full font-bold text-base md:text-lg">
+                                    你的分數: {gameState.players[user.uid]?.score || 0}
+                                    {gameState.mode === 'team' && <span className="ml-3 bg-blue-500 px-3 py-1 rounded-md text-sm md:text-base">{gameState.players[user.uid]?.team}</span>}
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white/10 h-4 w-full rounded-full mb-8 md:mb-10 overflow-hidden shadow-inner">
+                            <div className={`h-full transition-all duration-500 ease-linear ${isTimeLow ? 'bg-red-500' : 'bg-green-400'}`} style={{ width: `${progressPct}%` }} />
+                        </div>
+
+                        <div className="bg-white rounded-3xl shadow-2xl p-6 md:p-12 mb-8 text-gray-800">
+                            <div className="flex justify-between items-start mb-8">
+                                <h2 className="text-3xl md:text-4xl lg:text-5xl font-black text-gray-800 leading-tight md:pr-6">{currentQ.text}</h2>
+                                <div className={`flex items-center justify-center w-20 h-20 md:w-24 md:h-24 rounded-full border-[6px] md:border-8 ${isTimeLow ? 'border-red-500 text-red-500 animate-pulse' : 'border-blue-500 text-blue-600'} font-extrabold text-3xl md:text-4xl flex-shrink-0 ml-4 shadow-md`}>{timeLeft}</div>
+                            </div>
+                            {currentQ.imageBase64 && (<div className="mb-8 flex justify-center bg-gray-50 rounded-3xl p-4 md:p-6 border border-gray-100"><img src={currentQ.imageBase64} alt="題目圖片" className="max-h-64 md:max-h-80 object-contain rounded-2xl shadow-sm" /></div>)}
+                            <div className="text-base md:text-lg font-bold text-gray-400 mb-5 uppercase tracking-widest">
+                                {isPlayer ? (currentQ.type === 'single' ? '請選擇 1 個答案' : currentQ.type === 'multiple' ? '請選擇所有正確答案 (多選)' : '請在下方輸入你的答案') : '玩家作答中...'}
+                            </div>
+
+                            {isPlayer ? (
+                                currentQ.type === 'fill' ? (
+                                    <div className="mt-6"><input type="text" value={textAnswer} onChange={e => setTextAnswer(e.target.value)} disabled={hasSubmitted} placeholder="請輸入答案..." className={`w-full p-6 text-3xl md:text-4xl font-black rounded-3xl border-[6px] outline-none transition-all duration-200 bg-white ${hasSubmitted ? 'border-gray-200 text-gray-500 cursor-not-allowed' : 'border-blue-200 focus:border-blue-500 text-gray-800 shadow-inner'}`} autoFocus /></div>
+                                ) : (
+                                    <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
+                                        {(currentQ.options || []).map((opt, index) => {
+                                            const isSelected = selectedOptions.includes(opt.id);
+                                            const theme = optionColors[index % optionColors.length];
+                                            return (
+                                                <button key={opt.id} onClick={() => toggleOption(opt.id)} disabled={hasSubmitted} className={`relative p-6 md:p-8 text-left text-xl md:text-2xl font-bold rounded-3xl border-4 transition-all duration-200 flex flex-col justify-center items-center gap-4 ${isSelected ? theme.selected : theme.base} ${hasSubmitted && !isSelected ? 'opacity-40 grayscale-[50%] cursor-not-allowed' : 'hover:scale-[1.01]'}`}>
+                                                    <span className="absolute top-4 left-5 md:top-5 md:left-6 text-2xl md:text-3xl font-black opacity-30">{String.fromCharCode(65 + index)}</span>
+                                                    {opt.imageBase64 && <img src={opt.imageBase64} alt="選項圖片" className="max-h-36 md:max-h-48 object-contain rounded-xl shadow-md w-full" />}
+                                                    {opt.text && <span className="w-full text-center leading-relaxed">{opt.text}</span>}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )
+                            ) : (
+                                currentQ.type === 'fill' ? (
+                                    <div className="p-8 bg-gray-50 border-4 border-gray-200 rounded-3xl text-center">
+                                        <Clock className="animate-spin mx-auto text-gray-400 mb-4 text-5xl" />
+                                        <p className="text-gray-500 font-bold text-xl md:text-2xl">本題為填空題，等待玩家作答中</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid sm:grid-cols-2 gap-4 md:gap-6">
+                                        {(currentQ.options || []).map((opt, index) => {
+                                            const theme = optionColors[index % optionColors.length];
+                                            return (
+                                                <div key={opt.id} className={`relative p-6 md:p-8 text-left text-xl md:text-2xl font-bold rounded-3xl border-4 ${theme.base} opacity-90`}>
+                                                    <span className="absolute top-4 left-5 md:top-5 md:left-6 text-2xl md:text-3xl font-black opacity-30">{String.fromCharCode(65 + index)}</span>
+                                                    {opt.imageBase64 && <img src={opt.imageBase64} alt="選項圖片" className="max-h-36 md:max-h-48 object-contain rounded-xl shadow-md w-full mb-3" />}
+                                                    {opt.text && <span className="w-full text-center leading-relaxed block">{opt.text}</span>}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )
+                            )}
+                        </div>
+
+                        <div className="text-center flex flex-col items-center gap-5">
+                            {isPlayer && (
+                                !hasSubmitted ? (
+                                    <button onClick={() => submitAnswer()} disabled={currentQ.type === 'fill' ? textAnswer.trim() === '' : selectedOptions.length === 0} className="w-full md:w-auto md:min-w-[300px] px-12 py-5 md:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-2xl font-black rounded-full shadow-2xl transform hover:-translate-y-1 transition disabled:opacity-50 disabled:transform-none disabled:cursor-not-allowed tracking-widest">確定提交</button>
+                                ) : (
+                                    <div className="inline-flex items-center bg-white/10 backdrop-blur-md px-10 py-5 rounded-full text-white text-xl md:text-2xl font-bold border border-white/20 shadow-xl"><Clock className="animate-spin mr-4 text-blue-400 text-3xl" /> 已提交！等待其他玩家...</div>
+                                )
+                            )}
+                            {isHost && (
+                                <div className="flex flex-col items-center gap-4 mt-2">
+                                    <div className="inline-flex items-center bg-blue-900/60 backdrop-blur-md px-8 py-4 rounded-2xl text-blue-100 font-bold text-lg md:text-xl border border-blue-500/40 animate-fade-in-up">
+                                        <Users className="mr-3 text-blue-400 text-2xl" /> 全場作答進度：{answeredCount} / {totalPlayers} 人
+                                    </div>
+                                    <button onClick={async () => { if (isEnding) return; setIsEnding(true); await getGameRef(gameId).update({ deadline: Date.now() }); }} disabled={isEnding} className="px-8 py-3 bg-red-500/80 hover:bg-red-600 text-white rounded-xl font-bold transition shadow-lg disabled:opacity-50">提前結束本題</button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function Result({ user, gameState, gameId }) {
+            const [isTransitioning, setIsTransitioning] = useState(false);
+            const qIndex = gameState.currentQIndex;
+            const currentQ = gameState.questions?.[qIndex] || {}; 
+            const answers = gameState.answers?.[qIndex] || {};
+            const isHost = user?.uid === gameState.hostId;
+            const isPlayer = Boolean(gameState.players?.[user?.uid]);
+            const totalPlayers = Object.keys(gameState.players || {}).length;
+            
+            const pointsEarned = answers[user?.uid]?.pointsEarned || 0;
+            
+            const resultStats = useMemo(() => {
+                let isCorrect = false;
+                let optionStats = [];
+                let textStats = [];
+
+                if (currentQ.type === 'fill') {
+                    const validAnswers = (currentQ.fillAnswers || (currentQ.fillAnswer ? [currentQ.fillAnswer] : []))
+                        .map(a => currentQ.caseSensitive ? a.trim() : a.trim().toLowerCase())
+                        .filter(a => a !== '');
+                    const userText = currentQ.caseSensitive ? (answers[user?.uid]?.textAnswer || '').trim() : (answers[user?.uid]?.textAnswer || '').trim().toLowerCase();
+                    isCorrect = validAnswers.includes(userText) && userText !== '';
+
+                    const counts = {};
+                    Object.values(answers).forEach(ans => {
+                        const t = (ans.textAnswer || '(未作答)').trim();
+                        counts[t] = (counts[t] || 0) + 1;
+                    });
+                    textStats = Object.entries(counts)
+                        .map(([text, count]) => ({ text, count, percentage: totalPlayers ? Math.round((count / totalPlayers) * 100) : 0 }))
+                        .sort((a, b) => b.count - a.count);
+                } else if (currentQ.type) {
+                    const correctOptionIds = (currentQ.options || []).filter(o => o.isCorrect).map(o => o.id);
+                    const myAnswer = answers[user?.uid]?.options || [];
+                    isCorrect = JSON.stringify([...myAnswer].sort()) === JSON.stringify([...correctOptionIds].sort());
+
+                    optionStats = (currentQ.options || []).map(opt => {
+                        let count = 0;
+                        Object.values(answers).forEach(ans => { if ((ans.options || []).includes(opt.id)) count++; });
+                        return { ...opt, count, percentage: totalPlayers ? Math.round((count / totalPlayers) * 100) : 0 };
+                    });
+                }
+                return { isCorrect, optionStats, textStats, myAnswer: answers[user?.uid]?.options || [] };
+            }, [currentQ, answers, user?.uid, totalPlayers]);
+
+            const nextAction = async () => {
+                if (isTransitioning) return; setIsTransitioning(true);
+                if (qIndex < (gameState.questions?.length || 0) - 1) {
+                    await getGameRef(gameId).update({ status: 'interim_leaderboard' });
+                } else {
+                    await getGameRef(gameId).update({ status: 'finished' });
+                }
+            };
+
+            useEffect(() => {
+                if (!isHost) return;
+                const handleKeyDown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        nextAction();
+                    }
+                };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [isHost, isTransitioning, qIndex, gameId, gameState.questions]); 
+
+            if (!currentQ.type) return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl md:text-2xl"><Clock className="animate-spin mr-3" /> 載入統計資料中...</div>;
+
+            return (
+                <div className="min-h-screen bg-gray-900 py-8 md:py-12 px-4 md:px-8 font-sans flex flex-col items-center">
+                    <div className="w-full max-w-4xl">
+                        {isPlayer && (
+                            <div className={`rounded-[2rem] p-8 md:p-12 mb-8 text-center text-white shadow-2xl transform transition-all duration-500 scale-100 ${resultStats.isCorrect ? 'bg-gradient-to-r from-green-500 to-emerald-600' : 'bg-gradient-to-r from-red-500 to-rose-600'}`}>
+                                <div className="flex justify-center mb-4">{resultStats.isCorrect ? <CheckCircle2 className="text-6xl md:text-7xl" /> : <XCircle className="text-6xl md:text-7xl" />}</div>
+                                <h2 className="text-4xl md:text-5xl font-black mb-3">{resultStats.isCorrect ? '答對了！' : '答錯了...'}</h2>
+                                <p className="text-white/90 font-black text-2xl md:text-3xl mb-3">{resultStats.isCorrect ? `本次獲得 +${pointsEarned} 分` : '本次獲得 +0 分'}</p>
+                                <p className="text-white/80 font-bold text-lg md:text-xl bg-black/20 inline-block px-6 py-2 rounded-full mt-2">你的目前總分: {gameState.players[user.uid]?.score || 0}</p>
+                            </div>
+                        )}
+
+                        {isHost ? (
+                            <div className="bg-white rounded-3xl p-6 md:p-12 shadow-2xl mb-10 text-gray-800">
+                                <h3 className="text-2xl md:text-3xl lg:text-4xl font-black text-gray-800 mb-6 md:mb-8 leading-tight">{currentQ.text}</h3>
+                                {currentQ.imageBase64 && (<div className="mb-8 flex justify-center bg-gray-50 rounded-2xl p-4 md:p-6 border border-gray-100"><img src={currentQ.imageBase64} alt="題目圖片" className="max-h-56 md:max-h-72 object-contain rounded-xl" /></div>)}
+                                <div className="space-y-6 md:space-y-8">
+                                    {currentQ.type === 'fill' ? (
+                                        <div className="space-y-6">
+                                            <div className="p-6 bg-green-50 border-4 border-green-200 rounded-2xl">
+                                                <div className="flex items-center gap-3 mb-3"><p className="text-base md:text-lg text-green-700 font-bold">正確答案 (可接受的選項)</p>{currentQ.caseSensitive && <span className="text-sm bg-green-200 text-green-800 px-3 py-1 rounded-full font-bold">區分大小寫</span>}</div>
+                                                <p className="text-3xl md:text-4xl font-black text-green-800 break-all">{(currentQ.fillAnswers || []).join(' 或 ')}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-base md:text-lg text-gray-500 font-bold mb-4 uppercase tracking-widest">玩家作答統計</p>
+                                                <div className="space-y-4">
+                                                    {resultStats.textStats.map((stat, idx) => {
+                                                        const validAnswers = (currentQ.fillAnswers || []).map(a => currentQ.caseSensitive ? a.trim() : a.trim().toLowerCase()).filter(a => a !== '');
+                                                        const statText = currentQ.caseSensitive ? stat.text.trim() : stat.text.trim().toLowerCase();
+                                                        const isCorrectText = validAnswers.includes(statText) && statText !== '';
+                                                        const isMyTypedAnswer = (currentQ.caseSensitive ? stat.text.trim() : stat.text.toLowerCase()) === (currentQ.caseSensitive ? (answers[user.uid]?.textAnswer || '(未作答)').trim() : (answers[user.uid]?.textAnswer || '(未作答)').trim().toLowerCase());
+                                                        
+                                                        return (
+                                                            <div key={idx} className="relative">
+                                                                <div className={`flex justify-between items-center p-5 md:p-6 rounded-2xl border-[3px] z-10 relative bg-white/50 backdrop-blur-sm ${isCorrectText ? 'border-green-400' : 'border-gray-200'}`}>
+                                                                    <div className="flex items-center gap-4 font-bold text-lg md:text-xl flex-1 pr-4">{isCorrectText ? <CheckCircle2 className="text-green-500 text-2xl flex-shrink-0" /> : <div className="w-6 md:w-8 flex-shrink-0" />}<span className={`truncate ${isCorrectText ? 'text-green-800' : 'text-gray-700'}`}>{stat.text}</span>{isMyTypedAnswer && <span className="text-sm px-3 py-1.5 bg-blue-100 text-blue-800 rounded-full ml-3 flex-shrink-0">你的回答</span>}</div>
+                                                                    <div className="font-black text-gray-600 flex items-center gap-2 text-lg md:text-xl flex-shrink-0"><Users className="text-gray-400 text-xl"/> {stat.count} 人 ({stat.percentage}%)</div>
+                                                                </div>
+                                                                <div className={`absolute inset-y-0 left-0 rounded-2xl opacity-20 ${isCorrectText ? 'bg-green-500' : 'bg-gray-400'}`} style={{ width: `${stat.percentage}%` }} />
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        resultStats.optionStats.map((opt, index) => {
+                                            const isSelected = resultStats.myAnswer.includes(opt.id);
+                                            return (
+                                                <div key={opt.id} className="relative">
+                                                    <div className={`flex flex-col p-5 md:p-6 rounded-2xl border-[3px] z-10 relative bg-white/50 backdrop-blur-sm ${opt.isCorrect ? 'border-green-400' : 'border-gray-200'}`}>
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <div className="flex items-center gap-4 font-bold text-lg md:text-xl flex-1 pr-4"><span className="text-gray-400 font-black text-2xl">{String.fromCharCode(65 + index)}.</span>{opt.isCorrect ? <CheckCircle2 className="text-green-500 text-2xl flex-shrink-0" /> : <div className="w-6 md:w-8 flex-shrink-0" />}<span className={`truncate ${opt.isCorrect ? 'text-green-800' : 'text-gray-700'}`}>{opt.text || '(純圖片選項)'}</span>{isSelected && <span className="text-sm px-3 py-1.5 bg-blue-100 text-blue-800 rounded-full ml-3 flex-shrink-0">你的選擇</span>}</div>
+                                                            <div className="font-black text-gray-600 flex items-center gap-2 text-lg md:text-xl flex-shrink-0"><Users className="text-gray-400 text-xl"/> {opt.count} 人 ({opt.percentage}%)</div>
+                                                        </div>
+                                                        {opt.imageBase64 && <div className="pl-[4.5rem] pt-2"><img src={opt.imageBase64} alt="選項圖片" className="max-h-32 md:max-h-40 object-contain rounded-xl border border-gray-200 bg-white shadow-sm" /></div>}
+                                                    </div>
+                                                    <div className={`absolute inset-y-0 left-0 rounded-2xl opacity-20 ${opt.isCorrect ? 'bg-green-500' : 'bg-gray-400'}`} style={{ width: `${opt.percentage}%` }} />
+                                                </div>
+                                            );
+                                        })
+                                    )}
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white/10 backdrop-blur-md rounded-3xl p-10 shadow-xl mb-8 text-center text-white border border-white/20">
+                                <Clock className="animate-spin mx-auto mb-6 text-blue-400 text-5xl" />
+                                <h3 className="text-2xl md:text-3xl font-bold">等待主持人檢視作答結果...</h3>
+                                <p className="text-white/60 mt-3 md:text-lg">請看大螢幕了解全場統計</p>
+                            </div>
+                        )}
+
+                        <div className="text-center mt-8">
+                            {isHost ? (
+                                <button onClick={nextAction} disabled={isTransitioning} className="w-full md:w-auto md:min-w-[300px] px-12 py-5 md:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xl md:text-2xl font-black rounded-full shadow-2xl transform hover:-translate-y-1 transition disabled:opacity-50 disabled:transform-none">{isTransitioning ? <span className="flex items-center justify-center"><Clock className="animate-spin mr-3 text-2xl" /> 載入中...</span> : qIndex < (gameState.questions?.length || 0) - 1 ? <span className="flex items-center justify-center">查看目前排名 <Trophy className="ml-3 text-2xl" /></span> : <span className="flex items-center justify-center">查看最終排行榜 <Trophy className="ml-3 text-2xl" /></span>}</button>
+                            ) : (
+                                <div className="text-white/60 font-bold text-lg md:text-xl flex items-center justify-center">等待主持人進入下一階段...</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function InterimLeaderboard({ user, gameState, gameId }) {
+            const [isTransitioning, setIsTransitioning] = useState(false);
+            const isHost = user?.uid === gameState.hostId;
+            const qIndex = gameState.currentQIndex;
+            
+            const players = useMemo(() => Object.values(gameState.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0)), [gameState.players]);
+
+            const myRank = players.findIndex(p => p.uid === user?.uid) + 1;
+            const myPlayer = players.find(p => p.uid === user?.uid);
+
+            const nextQuestion = async () => {
+                if (isTransitioning) return; setIsTransitioning(true);
+                const nextQ = gameState.questions?.[qIndex + 1];
+                if (!nextQ) { await getGameRef(gameId).update({ status: 'finished' }); return; }
+                
+                await getGameRef(gameId).update({ 
+                    status: 'preview', 
+                    currentQIndex: qIndex + 1, 
+                    previewDeadline: Date.now() + 5000 
+                });
+            };
+
+            useEffect(() => {
+                if (!isHost) return;
+                const handleKeyDown = (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        nextQuestion();
+                    }
+                };
+                window.addEventListener('keydown', handleKeyDown);
+                return () => window.removeEventListener('keydown', handleKeyDown);
+            }, [isHost, isTransitioning, qIndex, gameId, gameState.questions]); 
+
+            return (
+                <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-hidden">
+                    <div className="w-full max-w-4xl z-10">
+                        <div className="text-center mb-10 interim-item" style={{ animationDelay: '0.1s' }}>
+                            <h2 className="text-2xl md:text-3xl font-bold text-blue-400 mb-3 uppercase tracking-widest">第 {qIndex + 1} 題結束</h2>
+                            <h1 className="text-5xl md:text-6xl font-black text-white mb-4 drop-shadow-md">目前分數排名</h1>
+                        </div>
+
+                        {isHost ? (
+                            <React.Fragment>
+                                {gameState.mode === 'team' && <TeamChart players={gameState.players} teamCount={gameState.teamCount} />}
+                                <div className="bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-10 mb-10 border border-white/20 interim-item" style={{ animationDelay: '0.3s' }}>
+                                    <div className="space-y-5 max-h-[50vh] overflow-y-auto pr-4 custom-scrollbar">
+                                        {players.map((p, index) => {
+                                            let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
+                                            if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
+                                            else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
+                                            else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
+                                            const isMe = p.uid === user?.uid;
+
+                                            return (
+                                                <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all interim-item ${isMe ? 'ring-4 ring-blue-400 shadow-[0_0_20px_rgba(96,165,250,0.6)]' : ''}`} style={{ animationDelay: `${0.5 + (index * 0.15)}s` }}>
+                                                    <div className="flex items-center gap-5">
+                                                        <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
+                                                        <span className={`text-2xl md:text-3xl font-bold flex items-center flex-wrap gap-3 ${isMe ? 'text-blue-300' : 'text-white'}`}>
+                                                            {p.nickname} 
+                                                            {gameState.mode === 'team' && <span className="text-sm md:text-base bg-blue-100 text-blue-900 px-3 py-1 rounded-full">{p.team}</span>} 
+                                                            {isMe && <span className="text-sm md:text-base bg-blue-500 text-white px-3 py-1 rounded-full shadow">你</span>}
+                                                        </span>
+                                                    </div>
+                                                    <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </React.Fragment>
+                        ) : (
+                            <div className="bg-white/10 backdrop-blur-md rounded-[3rem] shadow-2xl p-10 md:p-16 mb-10 border border-white/20 interim-item text-center w-full max-w-2xl mx-auto" style={{ animationDelay: '0.3s' }}>
+                                <h3 className="text-3xl md:text-4xl font-bold text-white mb-6">你的目前排名</h3>
+                                <div className="text-7xl md:text-8xl font-black text-yellow-400 drop-shadow-[0_0_20px_rgba(250,204,21,0.4)] mb-8">第 {myRank} 名</div>
+                                <div className="text-3xl md:text-4xl font-bold text-white/90">總分: {myPlayer?.score || 0} 分</div>
+                                {gameState.mode === 'team' && <div className="mt-8 inline-block px-8 py-3 bg-blue-500/30 border-2 border-blue-400 rounded-full text-blue-100 font-bold text-2xl shadow-lg">{myPlayer?.team}</div>}
+                            </div>
+                        )}
+
+                        <div className="text-center interim-item mt-10" style={{ animationDelay: `${0.8 + (players.length * 0.15)}s` }}>
+                            {isHost ? (
+                                <button onClick={nextQuestion} disabled={isTransitioning} className="w-full md:w-auto md:min-w-[350px] px-12 py-5 md:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xl md:text-3xl font-black rounded-full shadow-2xl transform hover:-translate-y-1 transition disabled:opacity-50 disabled:transform-none flex items-center justify-center mx-auto tracking-widest">{isTransitioning ? <span className="flex items-center"><Clock className="animate-spin mr-3 text-2xl" /> 載入中...</span> : <span className="flex items-center">下一道題 <ArrowRight className="ml-3 text-2xl" /></span>}</button>
+                            ) : (
+                                <div className="text-white/60 font-bold text-lg md:text-2xl flex items-center justify-center">等待主持人開啟下一題...</div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const Confetti = React.memo(() => {
+            const canvasRef = useRef(null);
+
+            useEffect(() => {
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                const setCanvasSize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+                setCanvasSize(); window.addEventListener('resize', setCanvasSize);
+
+                const particles = [];
+                const colors = ['#fce18a', '#ff726d', '#b48def', '#f4306d', '#3f88c5', '#03cea4'];
+                for (let i = 0; i < 150; i++) particles.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height - canvas.height, r: Math.random() * 6 + 2, d: Math.random() * 150 + 10, color: colors[Math.floor(Math.random() * colors.length)], tilt: Math.floor(Math.random() * 10) - 10, tiltAngleIncrement: (Math.random() * 0.07) + 0.05, tiltAngle: 0 });
+
+                let angle = 0; let animationFrameId; const startTime = Date.now();
+                const render = () => {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height); angle += 0.01; let stillVisible = false;
+                    for (let i = 0; i < particles.length; i++) {
+                        const p = particles[i]; p.tiltAngle += p.tiltAngleIncrement; p.y += (Math.cos(angle + p.d) + 1 + p.r / 2) / 2; p.x += Math.sin(angle); p.tilt = Math.sin(p.tiltAngle) * 15;
+                        if (p.y <= canvas.height) { stillVisible = true; ctx.beginPath(); ctx.lineWidth = p.r; ctx.strokeStyle = p.color; ctx.moveTo(p.x + p.tilt + p.r, p.y); ctx.lineTo(p.x + p.tilt, p.y + p.tilt + p.r); ctx.stroke(); }
+                        if (p.y > canvas.height && Date.now() - startTime < 7000) { p.x = Math.random() * canvas.width; p.y = -20; p.tilt = Math.floor(Math.random() * 10) - 10; stillVisible = true; }
+                    }
+                    if (stillVisible) animationFrameId = requestAnimationFrame(render);
+                };
+                render();
+                return () => { cancelAnimationFrame(animationFrameId); window.removeEventListener('resize', setCanvasSize); };
+            }, []);
+
+            return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-[100]" />;
+        });
+
+        function Leaderboard({ gameState, onBack, onReplay, user }) {
+            const isHost = user?.uid === gameState.hostId;
+            const players = useMemo(() => Object.values(gameState.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0)), [gameState.players]);
+
+            const exportGameStats = () => {
+                const { questions, answers, mode } = gameState;
+                let csvContent = "\uFEFF"; 
+                csvContent += "題目序號,題目內容,題目類型,作答人數,正確人數,正確率(%),最快答題(秒),最慢答題(秒),平均答題(秒),選項與答案統計分析\n";
+
+                if (questions && Array.isArray(questions)) {
+                    questions.forEach((q, qIndex) => {
+                        const qAnswers = answers?.[qIndex] || {};
+                        const answeredUids = Object.keys(qAnswers);
+                        const answeredCount = answeredUids.length;
+
+                        if (answeredCount === 0) {
+                            csvContent += `${qIndex + 1},"${(q.text || '').replace(/"/g, '""')}",${q.type === 'single' ? '單選' : q.type === 'multiple' ? '多選' : '填空'},0,0,0,N/A,N/A,N/A,無人作答\n`;
+                            return;
+                        }
+
+                        let correctCount = 0;
+                        let times = [];
+                        let optionCounts = {}; 
+                        let textCounts = {}; 
+
+                        if (q.type !== 'fill') {
+                            (q.options || []).forEach((o, i) => {
+                                optionCounts[o.id] = { text: o.text || `選項 ${String.fromCharCode(65+i)} (圖片)`, count: 0, isCorrect: o.isCorrect };
+                            });
+                        }
+
+                        answeredUids.forEach(uid => {
+                            const ans = qAnswers[uid];
+                            if (ans.responseTime !== undefined) {
+                                times.push(ans.responseTime);
+                            } else if (ans.timeRemaining !== undefined) {
+                                times.push(Math.max(0, (q.timeLimit || 20) - ans.timeRemaining));
+                            }
+
+                            if (q.type === 'fill') {
+                                const validAnswers = (q.fillAnswers || (q.fillAnswer ? [q.fillAnswer] : [])).map(a => q.caseSensitive ? a.trim() : a.trim().toLowerCase()).filter(a => a !== '');
+                                const userText = q.caseSensitive ? (ans.textAnswer || '').trim() : (ans.textAnswer || '').trim().toLowerCase();
+                                if (validAnswers.includes(userText) && userText !== '') correctCount++;
+
+                                const rawText = ans.textAnswer || '(未作答)';
+                                textCounts[rawText] = (textCounts[rawText] || 0) + 1;
+                            } else {
+                                const correctOptionIds = (q.options || []).filter(o => o.isCorrect).map(o => o.id).sort();
+                                const selected = [...(ans.options || [])].sort();
+                                if (JSON.stringify(selected) === JSON.stringify(correctOptionIds)) correctCount++;
+
+                                selected.forEach(optId => {
+                                    if (optionCounts[optId]) optionCounts[optId].count++;
+                                });
+                            }
+                        });
+
+                        const correctRate = Math.round((correctCount / answeredCount) * 100);
+                        let minTime = 'N/A', maxTime = 'N/A', avgTime = 'N/A';
+                        if (times.length > 0) {
+                            minTime = Math.min(...times).toFixed(1);
+                            maxTime = Math.max(...times).toFixed(1);
+                            avgTime = (times.reduce((a,b)=>a+b, 0) / times.length).toFixed(1);
+                        }
+
+                        let optionsAnalysis = "";
+                        if (q.type === 'fill') {
+                            const details = Object.entries(textCounts).map(([txt, c]) => `[${txt}]: ${c}人(${Math.round((c/answeredCount)*100)}%)`);
+                            optionsAnalysis = details.join(' | ');
+                        } else {
+                            const details = Object.values(optionCounts).map(o => `[${o.text}${o.isCorrect?'(正確)':''}] ${o.count}人(${Math.round((o.count/answeredCount)*100)}%)`);
+                            optionsAnalysis = details.join(' | ');
+                        }
+
+                        csvContent += `${qIndex + 1},"${(q.text || '').replace(/"/g, '""')}",${q.type === 'single' ? '單選' : q.type === 'multiple' ? '多選' : '填空'},${answeredCount},${correctCount},${correctRate},${minTime},${maxTime},${avgTime},"${optionsAnalysis.replace(/"/g, '""')}"\n`;
+                    });
+                }
+
+                csvContent += "\n\n名次,玩家暱稱,所屬隊伍,總分\n";
+                players.forEach((p, idx) => {
+                    csvContent += `${idx + 1},"${(p.nickname || '').replace(/"/g, '""')}",${gameState.mode === 'team' ? (p.team || '無') : '-'},${p.score || 0}\n`;
+                });
+
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                const dateStr = new Date().toLocaleString('zh-TW', { hour12: false }).replace(/[\/:\s]/g, '');
+                link.setAttribute('download', `遊戲數據分析_${dateStr}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-x-hidden overflow-y-auto relative">
+                    <Confetti />
+                    <div className="w-full max-w-4xl z-10">
+                        <div className="text-center mb-12 leaderboard-item" style={{ animationDelay: '0.1s' }}>
+                            <Trophy className="mx-auto text-yellow-400 mb-6 drop-shadow-[0_0_20px_rgba(250,204,21,0.6)] text-7xl md:text-[5rem]" />
+                            <h1 className="text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-600 mb-4 tracking-wider">遊戲結束</h1>
+                            <p className="text-gray-400 text-xl md:text-2xl font-bold">感謝所有玩家的參與！</p>
+                        </div>
+
+                        {gameState.mode === 'team' && <TeamChart players={gameState.players} teamCount={gameState.teamCount} />}
+
+                        <div className="bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-12 mb-10 border border-white/20 leaderboard-item" style={{ animationDelay: '0.3s' }}>
+                            <div className="space-y-5">
+                                {players.map((p, index) => {
+                                    let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
+                                    if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
+                                    else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
+                                    else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
+
+                                    return (
+                                        <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all hover:scale-[1.02] leaderboard-item`} style={{ animationDelay: `${0.6 + (index * 0.2)}s` }}>
+                                            <div className="flex items-center gap-5">
+                                                <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
+                                                <span className="text-2xl md:text-3xl font-bold text-white flex items-center flex-wrap gap-3">
+                                                    {p.nickname} 
+                                                    {gameState.mode === 'team' && <span className="text-sm md:text-base bg-blue-100 text-blue-900 px-3 py-1 rounded-full shadow">{p.team}</span>}
+                                                </span>
+                                            </div>
+                                            <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="text-center flex flex-col sm:flex-row items-center justify-center gap-4 md:gap-6 leaderboard-item pb-12" style={{ animationDelay: `${0.8 + (players.length * 0.2)}s` }}>
+                            {isHost && (
+                                <button onClick={exportGameStats} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition flex items-center justify-center">
+                                    <Download className="mr-3 text-2xl" /> 下載答題數據報表
+                                </button>
+                            )}
+                            <button onClick={onReplay} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition">返回題庫並建立新遊戲</button>
+                            <button onClick={onBack} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-lg md:text-xl font-bold transition border border-white/20">返回首頁</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- 啟動 React 應用 ---
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
