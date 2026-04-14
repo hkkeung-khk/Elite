@@ -73,7 +73,7 @@
                 if (window.location.protocol === 'blob:' || window.location.protocol === 'data:' || window.location.origin === 'null' || window.location.href.includes('usercontent.goog')) {
                     return; // 避免在特殊沙盒環境觸發 pushState 錯誤
                 }
-                const newUrl = gameId ? `?gameId=${gameId}` : window.location.pathname;
+                const newUrl = gameId ? `${window.location.pathname}?gameId=${gameId}` : window.location.pathname;
                 window.history.replaceState(null, '', newUrl);
             } catch (e) {
                 console.warn("環境不支援更新網址列，忽略操作。");
@@ -83,7 +83,6 @@
         // --- 數學排版引擎 (分數轉換) ---
         const FormattedText = ({ text }) => {
             if (typeof text !== 'string') return text;
-            // 尋找例如 4/9 的分數格式
             const fractionRegex = /(\d+\/\d+)/g;
             const parts = text.split(fractionRegex);
             return (
@@ -204,7 +203,6 @@
                         setGameState(null);
                         alert("找不到此遊戲房間！");
                         setGameId(null);
-                        // 清除網址列中的無效房間代號
                         safeUpdateUrl(null);
                     }
                 }, (error) => {
@@ -337,17 +335,19 @@
                                 });
                             }
 
+                            // 依照時間排序 (時間越早代表越快，排在越前面)
                             correctSubmissions.sort((a, b) => a.timestamp - b.timestamp);
                             const newPlayers = { ...players };
                             const updates = { status: 'result' };
                             
+                            // --- 最新熱血計分公式 ---
                             correctSubmissions.forEach((sub, index) => {
                                 const remainingSecs = Math.max(0, (currentGameState.deadline - sub.timestamp) / 1000);
-                                let points = 10;
-                                if (index === 0) points += 5;
-                                if (remainingSecs >= currentQ.timeLimit / 2) points += 3;
-                                else if (remainingSecs >= currentQ.timeLimit / 4) points += 2;
-                                else if (remainingSecs >= 3) points += 1;
+                                let points = 39; // 基礎分
+                                if (index === 0) points += 40; // 第一名
+                                if (remainingSecs >= currentQ.timeLimit / 2) points += 30;
+                                else if (remainingSecs >= currentQ.timeLimit / 4) points += 20;
+                                else if (remainingSecs >= 3) points += 10;
 
                                 if (newPlayers[sub.playerId]) {
                                     newPlayers[sub.playerId].score = (newPlayers[sub.playerId].score || 0) + points;
@@ -416,33 +416,88 @@
 
         // --- 子元件定義 ---
         const TeamChart = React.memo(({ players, teamCount }) => {
-            const { maxTeamScore, sortedTeams } = useMemo(() => {
-                const teamScores = {};
-                for (let i = 1; i <= teamCount; i++) teamScores[`隊伍${i}`] = 0;
-                Object.values(players).forEach(p => { if (p.team) teamScores[p.team] = (teamScores[p.team] || 0) + p.score; });
-                const maxScore = Math.max(...Object.values(teamScores).map(Number), 1); 
-                const sorted = Object.entries(teamScores).sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true }));
-                return { maxTeamScore: maxScore, sortedTeams: sorted };
-            }, [players, teamCount]);
+            const [animated, setAnimated] = useState(false);
+            const [showWinner, setShowWinner] = useState(false);
+            const [selectedTeam, setSelectedTeam] = useState(null);
 
-            const podiumColors = ['bg-[#e21b3c]', 'bg-[#1368ce]', 'bg-[#d89e00]', 'bg-[#26890c]', 'bg-[#864cbf]', 'bg-[#00a8ce]'];
+            useEffect(() => {
+                const t1 = setTimeout(() => setAnimated(true), 100);
+                const t2 = setTimeout(() => setShowWinner(true), 1200); // 動畫完成後顯示第一名
+                return () => { clearTimeout(t1); clearTimeout(t2); };
+            }, []);
+
+            const playersStr = JSON.stringify(players || {});
+            
+            const { maxTeamScore, sortedTeams, teamMembers } = useMemo(() => {
+                const parsedPlayers = JSON.parse(playersStr);
+                const teamScores = {};
+                const members = {};
+                for (let i = 1; i <= teamCount; i++) {
+                    teamScores[`隊伍${i}`] = 0;
+                    members[`隊伍${i}`] = [];
+                }
+                Object.values(parsedPlayers).forEach(p => {
+                    if (p.team) {
+                        teamScores[p.team] = (teamScores[p.team] || 0) + p.score;
+                        if (!members[p.team]) members[p.team] = [];
+                        members[p.team].push(p.nickname);
+                    }
+                });
+                const maxScore = Math.max(...Object.values(teamScores).map(Number), 1); 
+                // 由高分到低分排序 (左至右)
+                const sorted = Object.entries(teamScores).sort((a, b) => b[1] - a[1]);
+                return { maxTeamScore: maxScore, sortedTeams: sorted, teamMembers: members };
+            }, [playersStr, teamCount]);
+
+            const podiumColors = ['bg-[#e21b3c]', 'bg-[#1368ce]', 'bg-[#d89e00]', 'bg-[#26890c]', 'bg-[#864cbf]', 'bg-[#00a8ce]', 'bg-[#ff6b6b]', 'bg-[#4ecdc4]', 'bg-[#1a535c]', 'bg-[#ff9f1c]'];
 
             return (
-                <div className="w-full max-w-4xl mb-10 bg-white/10 backdrop-blur-md p-6 md:p-10 rounded-3xl border border-white/20 animate-fade-in-up overflow-x-auto custom-scrollbar">
-                    <h3 className="text-center text-white font-black mb-8 tracking-widest text-2xl md:text-3xl drop-shadow-md">隊伍總排名</h3>
-                    <div className="flex items-end justify-center gap-4 md:gap-6 min-w-[500px] h-64 md:h-80 border-b-4 border-white/30 pb-0">
-                        {sortedTeams.map(([teamName, score], index) => {
-                            const heightPercentage = score === 0 ? 8 : Math.max((score / maxTeamScore) * 100, 8); 
-                            const barColor = podiumColors[index % podiumColors.length];
-                            return (
-                                <div key={teamName} className="flex flex-col items-center flex-1 max-w-[120px] group h-full justify-end">
-                                    <span className="text-white font-black text-3xl md:text-5xl mb-2 drop-shadow-lg group-hover:-translate-y-2 transition-transform">{score}</span>
-                                    <div className={`w-full ${barColor} transition-all duration-1000 ease-out shadow-lg relative flex flex-col items-center justify-end pb-4`} style={{ height: `${heightPercentage}%` }}>
-                                        <span className="text-white font-bold text-lg md:text-2xl drop-shadow-md whitespace-nowrap">{teamName}</span>
+                <div className="w-full mb-10 flex flex-col md:flex-row gap-6 items-start justify-center">
+                    {/* 第一名揭曉區 (左側) */}
+                    {showWinner && sortedTeams.length > 0 && (
+                        <div className="md:w-1/4 bg-gradient-to-b from-yellow-400/30 to-yellow-600/10 border-2 border-yellow-400 rounded-3xl p-6 text-center animate-fade-in-up flex flex-col items-center justify-center self-stretch min-h-[300px] shadow-[0_0_30px_rgba(250,204,21,0.2)]">
+                            <Trophy className="text-yellow-400 text-6xl mb-4 drop-shadow-md animate-bounce" />
+                            <h4 className="text-yellow-300 font-black text-2xl mb-2 tracking-widest">目前領先</h4>
+                            <h3 className="text-white font-black text-4xl mb-6 drop-shadow-lg">{sortedTeams[0][0]}</h3>
+                            <div className="flex flex-wrap justify-center gap-2">
+                                {teamMembers[sortedTeams[0][0]]?.map(name => (
+                                    <div key={name} className="bg-white/20 text-white px-3 py-1.5 rounded-lg font-bold text-sm shadow-sm">{name}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* 長條圖區 */}
+                    <div className="flex-1 w-full bg-white/10 backdrop-blur-md p-6 md:p-10 rounded-3xl border border-white/20 animate-fade-in-up overflow-x-auto custom-scrollbar">
+                        <h3 className="text-center text-white font-black mb-8 tracking-widest text-2xl md:text-3xl drop-shadow-md">隊伍總排名</h3>
+                        <div className="flex items-end justify-start md:justify-center gap-4 md:gap-6 min-w-[500px] h-64 md:h-80 border-b-4 border-white/30 pb-0">
+                            {sortedTeams.map(([teamName, score], index) => {
+                                const heightPercentage = score === 0 ? 8 : Math.max((score / maxTeamScore) * 100, 8); 
+                                const barColor = podiumColors[index % podiumColors.length] || 'bg-gray-500';
+
+                                return (
+                                    <div key={teamName} onClick={() => setSelectedTeam(selectedTeam === teamName ? null : teamName)} className="flex flex-col items-center flex-1 max-w-[120px] group h-full justify-end cursor-pointer relative">
+                                        {/* 點擊顯示隊員名單 */}
+                                        {selectedTeam === teamName && (
+                                            <div className="absolute bottom-full mb-12 bg-white text-gray-800 p-3 rounded-2xl shadow-2xl z-50 animate-fade-in-up w-max max-w-[160px] text-center border border-gray-100">
+                                                <div className="font-black text-sm border-b-2 border-gray-100 pb-1.5 mb-1.5 text-blue-600">{teamName} 隊員</div>
+                                                {teamMembers[teamName]?.length > 0 ? teamMembers[teamName].map(name => <div key={name} className="text-sm font-bold truncate py-0.5">{name}</div>) : <div className="text-xs text-gray-400">無玩家</div>}
+                                                <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2 w-4 h-4 bg-white rotate-45 border-r border-b border-gray-100"></div>
+                                            </div>
+                                        )}
+                                        
+                                        <span className="text-white font-black text-2xl md:text-4xl mb-2 drop-shadow-lg group-hover:-translate-y-2 transition-transform">{score}</span>
+                                        <div 
+                                            className={`w-full ${barColor} transition-all duration-1000 ease-out shadow-lg relative flex flex-col items-center justify-end pb-4 hover:brightness-110 group-hover:shadow-[0_0_20px_rgba(255,255,255,0.3)]`}
+                                            style={{ height: animated ? `${heightPercentage}%` : '0%' }}
+                                        >
+                                            <span className="text-white font-bold text-base md:text-xl drop-shadow-md whitespace-nowrap">{teamName}</span>
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                        <p className="text-center text-white/50 text-sm mt-6 font-bold">👆 點擊隊伍長條圖可查看玩家名單</p>
                     </div>
                 </div>
             );
@@ -612,9 +667,7 @@
                         new Promise((_, reject) => setTimeout(() => reject(new Error("資料庫連線逾時 (Timeout)。\n\n請前往 Firebase 後台確認：\n1. 是否已點擊「建立 Firestore Database」\n2. 規則是否已設定為 allow read, write: if true;")), 8000))
                     ]);
                     
-                    // 安全地更新網址列，防止跨域或 Blob 環境報錯
                     safeUpdateUrl(newGameId);
-
                     onGameCreated(newGameId);
                 } catch (error) {
                     console.error("建立遊戲失敗:", error);
@@ -930,6 +983,40 @@
             const [hostNickname, setHostNickname] = useState('');
             const [isJoiningHost, setIsJoiningHost] = useState(false);
 
+            // --- 新增：勵志格言庫與循環輪播狀態 ---
+            const quotes = [
+                "每個人的花期不同，不必焦慮有人比你提前擁有",
+                "成功就是在緊要處多一份堅持",
+                "每個人都是天才，但如果靠爬樹的本領評斷一隻魚，那隻魚會一輩子相信自己會一事無成",
+                "再長的路，一步步也能走完",
+                "把困難舉在頭上，它就是滅頂石；把困難踩在腳下，它就是墊腳石",
+                "才能一旦讓懶惰支配，它就一無可為",
+                "只要站起來比倒下去多一次就是成功",
+                "當命運交給你一棵酸檸檬，你要想辦法把他做成一杯可口的檸檬汁",
+                "世界上兩種最耀眼的光，一種是太陽，另一種是你努力的樣子",
+                "海壓竹枝低復舉 風吹山角晦還明",
+                "失敗是命運發的體驗卡，用完即焚"
+            ];
+            const [quoteIndex, setQuoteIndex] = useState(() => Math.floor(Math.random() * quotes.length));
+            const [quoteFade, setQuoteFade] = useState(true);
+
+            useEffect(() => {
+                if (isHost) return;
+                const interval = setInterval(() => {
+                    setQuoteFade(false); // 觸發淡出
+                    setTimeout(() => {
+                        setQuoteIndex(prev => {
+                            let next = Math.floor(Math.random() * quotes.length);
+                            // 確保隨機不重複上一句
+                            if (next === prev) next = (next + 1) % quotes.length;
+                            return next;
+                        });
+                        setQuoteFade(true); // 觸發淡入
+                    }, 500); // 配合 CSS transition 時間
+                }, 9000);
+                return () => clearInterval(interval);
+            }, [isHost]);
+
             const hasPreloaded = useRef(false);
             useEffect(() => {
                 if (hasPreloaded.current || !gameState?.questions) return;
@@ -1034,13 +1121,31 @@
                             </div>
                             
                             <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">等待遊戲開始</h2>
-                            <p className="text-lg md:text-xl text-blue-200/80 mb-10 font-medium">請注意看主持人的大螢幕！<br/><span className="text-sm">圖片與資源已在背景載入中...</span></p>
+                            
+                            {/* --- 更新：隨機勵志格言輪播區塊 --- */}
+                            <div className="h-24 flex items-center justify-center mb-6">
+                                <p className={`text-base md:text-lg text-blue-200/90 font-medium transition-opacity duration-500 px-2 ${quoteFade ? 'opacity-100' : 'opacity-0'}`}>
+                                    {quotes[quoteIndex]}
+                                </p>
+                            </div>
                             
                             <div className="bg-black/30 rounded-2xl p-6 border border-white/10 shadow-inner text-gray-800">
-                                <p className="text-sm md:text-base text-gray-400 font-bold mb-2 uppercase tracking-widest">你的參賽身分</p>
-                                <p className="text-3xl md:text-4xl font-black text-white">{gameState.players[user.uid]?.nickname}</p>
+                                <p className="text-sm md:text-base text-gray-400 font-bold mb-3 uppercase tracking-widest">你的參賽身分</p>
+                                
+                                {/* --- 更新：點擊即可編輯的專屬暱稱區塊 --- */}
+                                <div className="flex justify-center group cursor-pointer" onClick={() => { if(!editingNickname){ setNewNickname(gameState.players[user.uid]?.nickname); setEditingNickname(true); }}}>
+                                    {editingNickname ? (
+                                        <input type="text" autoFocus className="w-full max-w-[200px] bg-transparent border-b-2 border-white/50 focus:border-white text-center outline-none font-black text-3xl md:text-4xl text-white placeholder-white/50" value={newNickname} onChange={e => setNewNickname(e.target.value)} onBlur={saveNickname} onKeyDown={e => e.key === 'Enter' && saveNickname()} maxLength="12" />
+                                    ) : (
+                                        <div className="flex items-center justify-center gap-3 hover:text-blue-200 transition" title="點擊修改暱稱">
+                                            <p className="text-3xl md:text-4xl font-black text-white">{gameState.players[user.uid]?.nickname}</p>
+                                            <Edit className="opacity-50 group-hover:opacity-100 text-white text-lg md:text-xl" />
+                                        </div>
+                                    )}
+                                </div>
+
                                 {gameState.mode === 'team' && (
-                                    <div className="mt-4 inline-block px-5 py-2 bg-blue-500/30 border border-blue-400 rounded-full text-blue-100 font-bold text-lg shadow-lg">
+                                    <div className="mt-5 inline-block px-5 py-2 bg-blue-500/30 border border-blue-400 rounded-full text-blue-100 font-bold text-lg shadow-lg">
                                         {gameState.players[user.uid]?.team}
                                     </div>
                                 )}
@@ -1528,6 +1633,15 @@
             
             const pointsEarned = answers[user?.uid]?.pointsEarned || 0;
             
+            const myTotalScore = useMemo(() => {
+                if (!gameState.players?.[user?.uid]) return 0;
+                if (gameState.mode === 'team') {
+                    const myTeam = gameState.players[user?.uid].team;
+                    return Object.values(gameState.players).filter(p => p.team === myTeam).reduce((sum, p) => sum + p.score, 0);
+                }
+                return gameState.players[user?.uid].score || 0;
+            }, [gameState.players, user?.uid, gameState.mode]);
+
             const resultStats = useMemo(() => {
                 let isCorrect = false;
                 let optionStats = [];
@@ -1593,7 +1707,7 @@
                                 <div className="flex justify-center mb-4">{resultStats.isCorrect ? <CheckCircle2 className="text-6xl md:text-7xl" /> : <XCircle className="text-6xl md:text-7xl" />}</div>
                                 <h2 className="text-4xl md:text-5xl font-black mb-3">{resultStats.isCorrect ? '答對了！' : '答錯了...'}</h2>
                                 <p className="text-white/90 font-black text-2xl md:text-3xl mb-3">{resultStats.isCorrect ? `本次獲得 +${pointsEarned} 分` : '本次獲得 +0 分'}</p>
-                                <p className="text-white/80 font-bold text-lg md:text-xl bg-black/20 inline-block px-6 py-2 rounded-full mt-2">你的目前總分: {gameState.players[user.uid]?.score || 0}</p>
+                                <p className="text-white/80 font-bold text-lg md:text-xl bg-black/20 inline-block px-6 py-2 rounded-full mt-2">{gameState.mode === 'team' ? '你的隊伍目前總分' : '你的目前總分'}: {myTotalScore} 分</p>
                             </div>
                         )}
 
@@ -1675,10 +1789,27 @@
             const qIndex = gameState.currentQIndex;
             
             const playersStr = JSON.stringify(gameState.players || {});
-            const players = useMemo(() => Object.values(gameState.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0)), [playersStr]);
-
-            const myRank = players.findIndex(p => p.uid === user?.uid) + 1;
-            const myPlayer = players.find(p => p.uid === user?.uid);
+            const isTeamMode = gameState.mode === 'team';
+            
+            const { displayRank, displayScore } = useMemo(() => {
+                const parsedPlayers = JSON.parse(playersStr);
+                const myP = parsedPlayers[user?.uid];
+                if (!myP) return { displayRank: '-', displayScore: 0 };
+                
+                if (isTeamMode) {
+                    const teamScores = {};
+                    Object.values(parsedPlayers).forEach(p => {
+                        if (p.team) teamScores[p.team] = (teamScores[p.team] || 0) + p.score;
+                    });
+                    const sorted = Object.entries(teamScores).sort((a,b)=>b[1]-a[1]);
+                    const rank = sorted.findIndex(t => t[0] === myP.team) + 1;
+                    return { displayRank: rank, displayScore: teamScores[myP.team] || 0 };
+                } else {
+                    const sortedP = Object.values(parsedPlayers).sort((a,b)=>b.score - a.score);
+                    const rank = sortedP.findIndex(p => p.uid === user?.uid) + 1;
+                    return { displayRank: rank, displayScore: myP.score || 0 };
+                }
+            }, [playersStr, user?.uid, isTeamMode]);
 
             const nextQuestion = async () => {
                 if (isTransitioning) return; setIsTransitioning(true);
@@ -1706,7 +1837,7 @@
 
             return (
                 <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-hidden">
-                    <div className="w-full max-w-4xl z-10">
+                    <div className="w-full max-w-7xl z-10">
                         <div className="text-center mb-10 interim-item" style={{ animationDelay: '0.1s' }}>
                             <h2 className="text-2xl md:text-3xl font-bold text-blue-400 mb-3 uppercase tracking-widest">第 {qIndex + 1} 題結束</h2>
                             <h1 className="text-5xl md:text-6xl font-black text-white mb-4 drop-shadow-md">目前分數排名</h1>
@@ -1715,42 +1846,44 @@
                         {isHost ? (
                             <React.Fragment>
                                 {gameState.mode === 'team' && <TeamChart players={gameState.players} teamCount={gameState.teamCount} />}
-                                <div className="bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-10 mb-10 border border-white/20 interim-item" style={{ animationDelay: '0.3s' }}>
-                                    <div className="space-y-5 max-h-[50vh] overflow-y-auto pr-4 custom-scrollbar">
-                                        {players.map((p, index) => {
-                                            let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
-                                            if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
-                                            else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
-                                            else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
-                                            const isMe = p.uid === user?.uid;
+                                
+                                {gameState.mode !== 'team' && (
+                                    <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-10 mb-10 border border-white/20 interim-item" style={{ animationDelay: '0.3s' }}>
+                                        <div className="space-y-5 max-h-[50vh] overflow-y-auto pr-4 custom-scrollbar">
+                                            {Object.values(gameState.players || {}).sort((a, b) => (b.score || 0) - (a.score || 0)).map((p, index) => {
+                                                let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
+                                                if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
+                                                else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
+                                                else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
+                                                const isMe = p.uid === user?.uid;
 
-                                            return (
-                                                <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all interim-item ${isMe ? 'ring-4 ring-blue-400 shadow-[0_0_20px_rgba(96,165,250,0.6)]' : ''}`} style={{ animationDelay: `${0.5 + (index * 0.15)}s` }}>
-                                                    <div className="flex items-center gap-5">
-                                                        <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
-                                                        <span className={`text-2xl md:text-3xl font-bold flex items-center flex-wrap gap-3 ${isMe ? 'text-blue-300' : 'text-white'}`}>
-                                                            {p.nickname} 
-                                                            {gameState.mode === 'team' && <span className="text-sm md:text-base bg-blue-100 text-blue-900 px-3 py-1 rounded-full">{p.team}</span>} 
-                                                            {isMe && <span className="text-sm md:text-base bg-blue-500 text-white px-3 py-1 rounded-full shadow">你</span>}
-                                                        </span>
+                                                return (
+                                                    <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all interim-item ${isMe ? 'ring-4 ring-blue-400 shadow-[0_0_20px_rgba(96,165,250,0.6)]' : ''}`} style={{ animationDelay: `${0.5 + (index * 0.15)}s` }}>
+                                                        <div className="flex items-center gap-5">
+                                                            <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
+                                                            <span className={`text-2xl md:text-3xl font-bold flex items-center flex-wrap gap-3 ${isMe ? 'text-blue-300' : 'text-white'}`}>
+                                                                {p.nickname} 
+                                                                {isMe && <span className="text-sm md:text-base bg-blue-500 text-white px-3 py-1 rounded-full shadow">你</span>}
+                                                            </span>
+                                                        </div>
+                                                        <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
                                                     </div>
-                                                    <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
-                                                </div>
-                                            );
-                                        })}
+                                                );
+                                            })}
+                                        </div>
                                     </div>
-                                </div>
+                                )}
                             </React.Fragment>
                         ) : (
                             <div className="bg-white/10 backdrop-blur-md rounded-[3rem] shadow-2xl p-10 md:p-16 mb-10 border border-white/20 interim-item text-center w-full max-w-2xl mx-auto" style={{ animationDelay: '0.3s' }}>
                                 <h3 className="text-3xl md:text-4xl font-bold text-white mb-6">你的目前排名</h3>
-                                <div className="text-7xl md:text-8xl font-black text-yellow-400 drop-shadow-[0_0_20px_rgba(250,204,21,0.4)] mb-8">第 {myRank} 名</div>
-                                <div className="text-3xl md:text-4xl font-bold text-white/90">總分: {myPlayer?.score || 0} 分</div>
-                                {gameState.mode === 'team' && <div className="mt-8 inline-block px-8 py-3 bg-blue-500/30 border-2 border-blue-400 rounded-full text-blue-100 font-bold text-2xl shadow-lg">{myPlayer?.team}</div>}
+                                <div className="text-7xl md:text-8xl font-black text-yellow-400 drop-shadow-[0_0_20px_rgba(250,204,21,0.4)] mb-8">第 {displayRank} 名</div>
+                                <div className="text-3xl md:text-4xl font-bold text-white/90">{isTeamMode ? '隊伍總分' : '個人總分'}: {displayScore} 分</div>
+                                {isTeamMode && <div className="mt-8 inline-block px-8 py-3 bg-blue-500/30 border-2 border-blue-400 rounded-full text-blue-100 font-bold text-2xl shadow-lg">{myPlayer?.team}</div>}
                             </div>
                         )}
 
-                        <div className="text-center interim-item mt-10" style={{ animationDelay: `${0.8 + (players.length * 0.15)}s` }}>
+                        <div className="text-center interim-item mt-10" style={{ animationDelay: '1.5s' }}>
                             {isHost ? (
                                 <button onClick={nextQuestion} disabled={isTransitioning} className="w-full md:w-auto md:min-w-[350px] px-12 py-5 md:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xl md:text-3xl font-black rounded-full shadow-2xl transform hover:-translate-y-1 transition disabled:opacity-50 disabled:transform-none flex items-center justify-center mx-auto tracking-widest">{isTransitioning ? <span className="flex items-center"><Clock className="animate-spin mr-3 text-2xl" /> 載入中...</span> : <span className="flex items-center">下一道題 <ArrowRight className="ml-3 text-2xl" /></span>}</button>
                             ) : (
@@ -1890,46 +2023,49 @@
             return (
                 <div className="min-h-screen bg-gray-900 py-12 px-4 md:px-8 font-sans flex flex-col items-center overflow-x-hidden overflow-y-auto relative">
                     <Confetti />
-                    <div className="w-full max-w-4xl z-10">
+                    <div className="w-full max-w-7xl z-10">
                         <div className="text-center mb-12 leaderboard-item" style={{ animationDelay: '0.1s' }}>
                             <Trophy className="mx-auto text-yellow-400 mb-6 drop-shadow-[0_0_20px_rgba(250,204,21,0.6)] text-7xl md:text-[5rem]" />
                             <h1 className="text-6xl md:text-7xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-yellow-600 mb-4 tracking-wider">遊戲結束</h1>
                             <p className="text-gray-400 text-xl md:text-2xl font-bold">感謝所有玩家的參與！</p>
                         </div>
 
-                        {gameState.mode === 'team' && <TeamChart players={gameState.players} teamCount={gameState.teamCount} />}
+                        {gameState.mode === 'team' ? (
+                            <TeamChart players={gameState.players} teamCount={gameState.teamCount} />
+                        ) : (
+                            <div className="max-w-4xl mx-auto bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-12 mb-10 border border-white/20 leaderboard-item" style={{ animationDelay: '0.3s' }}>
+                                <div className="space-y-5">
+                                    {players.map((p, index) => {
+                                        let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
+                                        if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
+                                        else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
+                                        else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
 
-                        <div className="bg-white/10 backdrop-blur-md rounded-[2rem] shadow-2xl p-6 md:p-12 mb-10 border border-white/20 leaderboard-item" style={{ animationDelay: '0.3s' }}>
-                            <div className="space-y-5">
-                                {players.map((p, index) => {
-                                    let badgeColor = 'bg-white/20 text-white'; let border = 'border-white/10 bg-white/5';
-                                    if (index === 0) { badgeColor = 'bg-yellow-400 text-yellow-900 shadow-[0_0_15px_rgba(250,204,21,0.5)]'; border = 'border-yellow-400/60 bg-yellow-400/20 shadow-lg'; }
-                                    else if (index === 1) { badgeColor = 'bg-gray-300 text-gray-800 shadow-md'; border = 'border-gray-300/60 bg-gray-300/20 shadow-md'; }
-                                    else if (index === 2) { badgeColor = 'bg-amber-600 text-amber-50 shadow-md'; border = 'border-amber-600/60 bg-amber-600/20 shadow-md'; }
-
-                                    return (
-                                        <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all hover:scale-[1.02] leaderboard-item`} style={{ animationDelay: `${0.6 + (index * 0.2)}s` }}>
-                                            <div className="flex items-center gap-5">
-                                                <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
-                                                <span className="text-2xl md:text-3xl font-bold text-white flex items-center flex-wrap gap-3">
-                                                    {p.nickname} 
-                                                    {gameState.mode === 'team' && <span className="text-sm md:text-base bg-blue-100 text-blue-900 px-3 py-1 rounded-full shadow">{p.team}</span>}
-                                                </span>
+                                        return (
+                                            <div key={index} className={`flex items-center justify-between p-5 md:p-6 rounded-2xl border-2 ${border} transition-all hover:scale-[1.02] leaderboard-item`} style={{ animationDelay: `${0.6 + (index * 0.2)}s` }}>
+                                                <div className="flex items-center gap-5">
+                                                    <div className={`w-12 h-12 md:w-16 md:h-16 rounded-full flex items-center justify-center font-black text-xl md:text-3xl ${badgeColor}`}>{index + 1}</div>
+                                                    <span className="text-2xl md:text-3xl font-bold text-white flex items-center flex-wrap gap-3">
+                                                        {p.nickname} 
+                                                    </span>
+                                                </div>
+                                                <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
                                             </div>
-                                            <div className="text-3xl md:text-4xl font-black text-white">{p.score || 0} <span className="text-lg md:text-xl font-medium text-white/60">分</span></div>
-                                        </div>
-                                    );
-                                })}
+                                        );
+                                    })}
+                                </div>
                             </div>
-                        </div>
+                        )}
 
-                        <div className="text-center flex flex-col sm:flex-row items-center justify-center gap-4 md:gap-6 leaderboard-item pb-12" style={{ animationDelay: `${0.8 + (players.length * 0.2)}s` }}>
+                        <div className="text-center flex flex-col sm:flex-row items-center justify-center gap-4 md:gap-6 leaderboard-item pb-12" style={{ animationDelay: '1.5s' }}>
                             {isHost && (
-                                <button onClick={exportGameStats} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition flex items-center justify-center">
-                                    <Download className="mr-3 text-2xl" /> 下載答題數據報表
-                                </button>
+                                <React.Fragment>
+                                    <button onClick={exportGameStats} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition flex items-center justify-center">
+                                        <Download className="mr-3 text-2xl" /> 下載答題數據報表
+                                    </button>
+                                    <button onClick={onReplay} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition">返回題庫並建立新遊戲</button>
+                                </React.Fragment>
                             )}
-                            <button onClick={onReplay} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-lg md:text-xl font-bold shadow-lg transform hover:-translate-y-1 transition">返回題庫並建立新遊戲</button>
                             <button onClick={onBack} className="w-full sm:w-auto px-8 md:px-10 py-4 md:py-5 bg-white/10 hover:bg-white/20 text-white rounded-2xl text-lg md:text-xl font-bold transition border border-white/20">返回首頁</button>
                         </div>
                     </div>
