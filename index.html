@@ -4,12 +4,39 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 
-// --- Firebase Initialization ---
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+  // --- Firebase 初始化設定 ---
+        let firebaseConfig = {};
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            // 【整合完成】：使用您提供的專屬 Firebase 設定
+            firebaseConfig = {
+                apiKey: "AIzaSyCXwi1vuQ7yyIrAgPxK9P4r9MneAJqXnqU",
+                authDomain: "etlite-f7c2a.firebaseapp.com",
+                databaseURL: "https://etlite-f7c2a-default-rtdb.firebaseio.com",
+                projectId: "etlite-f7c2a",
+                storageBucket: "etlite-f7c2a.firebasestorage.app",
+                messagingSenderId: "400273321762",
+                appId: "1:400273321762:web:e619520536fec308a17f7b",
+                measurementId: "G-Q524BFZFB8"
+            };
+        }
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+            // 啟動 Analytics 分析功能
+            if (firebaseConfig.measurementId) {
+                firebase.analytics();
+            }
+        }
+        
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        // 將遊戲專案識別碼更新為您的 Firebase projectId
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'etlite-f7c2a';
+
+        // Firestore 捷徑函數
+        const getGameRef = (gameId) => db.doc(`artifacts/${appId}/public/data/games/${gameId}`);
 
 // --- 全域樣式 (取代原本的 HTML style 標籤) ---
 const GlobalStyles = () => (
