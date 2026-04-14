@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>多人連線問答遊戲</title>
+    <title>數學天才培養室</title>
     
     <!-- 引入 Tailwind CSS 框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -766,6 +766,7 @@
 
                     const isOldFormat = rows[0].indexOf('選項1圖片Base64') === -1;
                     const step = isOldFormat ? 2 : 3;
+                    const newQuestions = []; // 修復 ReferenceError: newQuestions is not defined
 
                     for (let i = 1; i < rows.length; i++) {
                         const row = rows[i];
@@ -1190,7 +1191,11 @@
                 "當命運交給你一棵酸檸檬，你要想辦法把他做成一杯可口的檸檬汁",
                 "世界上兩種最耀眼的光，一種是太陽，另一種是你努力的樣子",
                 "海壓竹枝低復舉 風吹山角晦還明",
-                "失敗是命運發的體驗卡，用完即焚"
+                "失敗是命運發的體驗卡，用完即焚",
+                "過錯是暫時的遺憾，而錯過則是永遠的遺憾",
+                "寶劍鋒從磨礪出，梅花香自苦寒來",
+                "大雨可以延遲我們到達的時間，但不能阻止前進的步伐",
+                "每天多努力一點，成為自己想要的樣子"
             ];
             const [quoteIndex, setQuoteIndex] = useState(() => Math.floor(Math.random() * quotes.length));
             const [quoteFade, setQuoteFade] = useState(true);
