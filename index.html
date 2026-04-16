@@ -770,6 +770,9 @@
 
                     const isOldFormat = rows[0].indexOf('選項1圖片Base64') === -1;
                     const step = isOldFormat ? 2 : 3;
+                    
+                    // --- 修復點：加入 newQuestions 陣列的宣告 ---
+                    const newQuestions = [];
 
                     for (let i = 1; i < rows.length; i++) {
                         const row = rows[i];
