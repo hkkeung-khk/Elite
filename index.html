@@ -177,13 +177,15 @@
                 CheckCircle2: 'fa-check-circle', XCircle: 'fa-times-circle', ArrowRight: 'fa-arrow-right',
                 Download: 'fa-download', Upload: 'fa-upload', FileText: 'fa-file-alt', Edit: 'fa-edit',
                 ImagePlus: 'fa-image', X: 'fa-times', GripVertical: 'fa-grip-vertical',
-                Volume2: 'fa-volume-up', VolumeX: 'fa-volume-mute', Music: 'fa-music', Keyboard: 'fa-keyboard'
+                Volume2: 'fa-volume-up', VolumeX: 'fa-volume-mute', Music: 'fa-music', Keyboard: 'fa-keyboard',
+                Minus: 'fa-minus'
             };
             return <i className={`fas ${faMap[name]} ${className} flex items-center justify-center`} style={{ fontSize: size }} title={title}></i>;
         };
 
         const Play = (props) => <Icon name="Play" {...props} />;
         const Plus = (props) => <Icon name="Plus" {...props} />;
+        const Minus = (props) => <Icon name="Minus" {...props} />;
         const Trash2 = (props) => <Icon name="Trash2" {...props} />;
         const Users = (props) => <Icon name="Users" {...props} />;
         const Clock = (props) => <Icon name="Clock" {...props} />;
@@ -235,7 +237,6 @@
             const [loading, setLoading] = useState(true);
             const [view, setView] = useState('join');
             
-            // 題庫預設為空白
             const [reusableQuestions, setReusableQuestions] = useState([]);
 
             useEffect(() => {
@@ -484,18 +485,21 @@
         }
 
         // --- 子元件定義 ---
-        const TeamChart = React.memo(({ players, teamCount }) => {
+        const TeamChart = React.memo(({ players, teams }) => {
             const [selectedTeam, setSelectedTeam] = useState(null);
             
             const { maxTeamScore, sortedTeams, teamMembers } = useMemo(() => {
                 const teamScores = {};
                 const members = {};
-                for (let i = 1; i <= teamCount; i++) {
-                    teamScores[`隊伍${i}`] = 0;
-                    members[`隊伍${i}`] = [];
-                }
+                const currentTeams = teams || [];
+                
+                currentTeams.forEach(t => {
+                    teamScores[t] = 0;
+                    members[t] = [];
+                });
+
                 Object.values(players || {}).forEach(p => {
-                    if (p.team) {
+                    if (p.team && currentTeams.includes(p.team)) {
                         teamScores[p.team] += p.score || 0;
                         members[p.team].push(p.nickname);
                     }
@@ -504,7 +508,7 @@
                 // 左到右由高分排到低分
                 const sorted = Object.entries(teamScores).sort((a, b) => b[1] - a[1]);
                 return { maxTeamScore: maxScore, sortedTeams: sorted, teamMembers: members };
-            }, [players, teamCount]);
+            }, [players, teams]);
 
             const podiumColors = ['bg-[#e21b3c]', 'bg-[#1368ce]', 'bg-[#d89e00]', 'bg-[#26890c]', 'bg-[#864cbf]', 'bg-[#00a8ce]', 'bg-[#ff6b6b]', 'bg-[#4ecdc4]', 'bg-[#1a535c]', 'bg-[#ff9f1c]'];
 
@@ -766,7 +770,6 @@
 
                     const isOldFormat = rows[0].indexOf('選項1圖片Base64') === -1;
                     const step = isOldFormat ? 2 : 3;
-                    const newQuestions = []; // 修復 ReferenceError: newQuestions is not defined
 
                     for (let i = 1; i < rows.length; i++) {
                         const row = rows[i];
@@ -789,7 +792,6 @@
                                 const isCorrect = row[j+1]?.trim().toLowerCase() === 'true';
                                 let optImageBase64 = isOldFormat ? '' : (row[j+2]?.trim() || '');
                                 
-                                // --- 重點修復：過濾無效的 base64 圖片字串，防止破圖 ---
                                 if (optImageBase64 && !optImageBase64.startsWith('data:image/')) {
                                     optImageBase64 = '';
                                 }
@@ -834,7 +836,9 @@
                     const newGameId = Math.random().toString(36).substr(2, 6).toUpperCase();
                     const gameData = JSON.parse(JSON.stringify({
                         pin: newGameId, hostId: user.uid, status: 'lobby', questions: questions, currentQIndex: 0,
-                        mode: gameMode, teamCount: gameMode === 'team' ? teamCount : 0, players: {}, answers: {}, createdAt: Date.now()
+                        mode: gameMode, 
+                        teams: gameMode === 'team' ? Array.from({length: teamCount}, (_, i) => `隊伍${i+1}`) : [],
+                        players: {}, answers: {}, createdAt: Date.now()
                     }));
 
                     const setPromise = getGameRef(newGameId).set(gameData);
@@ -859,7 +863,7 @@
                         <div className="flex justify-between items-center mb-4 md:mb-8 relative">
                             <button onClick={onBack} className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold rounded-xl transition flex items-center absolute left-0"><ArrowRight className="mr-2 rotate-180" style={{fontSize: 18}} /> 返回首頁</button>
                             <div className="text-center w-full">
-                                <h1 className="text-3xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-2">建立你的問答遊戲</h1>
+                                <h1 className="text-3xl md:text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-purple-600 mb-2">數學天才培養室</h1>
                                 <p className="text-sm md:text-base text-gray-500">設計題目，邀請朋友挑戰！</p>
                             </div>
                         </div>
@@ -868,11 +872,11 @@
                             <h2 className="text-xl md:text-2xl font-bold text-gray-800 flex items-center">選擇遊戲模式</h2>
                             <div className="flex flex-col sm:flex-row gap-4 sm:gap-8">
                                 <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 transition"><input type="radio" value="solo" checked={gameMode === 'solo'} onChange={() => setGameMode('solo')} className="w-6 h-6 text-blue-600" /><span className="font-medium text-gray-700 text-lg md:text-xl">單人比拼模式</span></label>
-                                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 transition"><input type="radio" value="team" checked={gameMode === 'team'} onChange={() => setGameMode('team')} className="w-6 h-6 text-blue-600" /><span className="font-medium text-gray-700 text-lg md:text-xl">組隊模式</span></label>
+                                <label className="flex items-center gap-3 cursor-pointer p-3 rounded-lg hover:bg-gray-50 transition"><input type="radio" value="team" checked={gameMode === 'team'} onChange={() => setGameMode('team')} className="w-6 h-6 text-blue-600" /><span className="font-medium text-gray-700 text-lg md:text-xl">團隊模式</span></label>
                             </div>
                             {gameMode === 'team' && (
                                 <div className="flex items-center gap-4 mt-2 p-4 md:p-6 bg-blue-50 rounded-xl border border-blue-100">
-                                    <label className="text-blue-800 font-bold text-lg md:text-xl">設定隊伍數量：</label>
+                                    <label className="text-blue-800 font-bold text-lg md:text-xl">設定初始隊伍數量：</label>
                                     <input type="number" min="2" max="10" value={teamCount} onChange={(e) => setTeamCount(parseInt(e.target.value) || 2)} className="border-2 border-blue-200 rounded-lg px-4 py-2 w-24 text-center font-bold text-xl text-blue-900 focus:outline-none focus:border-blue-500" />
                                 </div>
                             )}
@@ -1104,8 +1108,9 @@
                     let assignedTeam = null;
                     
                     if (gameData.mode === 'team') {
+                        const currentTeams = gameData.teams || Array.from({length: gameData.teamCount || 2}, (_, i) => `隊伍${i+1}`);
                         const teamTotals = {};
-                        for (let i = 1; i <= (gameData.teamCount || 2); i++) teamTotals[`隊伍${i}`] = 0;
+                        currentTeams.forEach(t => teamTotals[t] = 0);
                         
                         Object.values(gameData.players || {}).forEach(p => {
                             if (p.team && teamTotals[p.team] !== undefined) teamTotals[p.team]++;
@@ -1171,8 +1176,14 @@
             const playersStr = JSON.stringify(gameState.players || {});
             const playersArray = useMemo(() => Object.entries(gameState.players || {}).map(([uid, data]) => ({ uid, ...data })), [playersStr]);
             
+            const currentTeams = useMemo(() => gameState.teams || Array.from({length: gameState.teamCount || 2}, (_, i) => `隊伍${i+1}`), [gameState.teams, gameState.teamCount]);
+
             const [editingUid, setEditingUid] = useState(null);
             const [editNameValue, setEditNameValue] = useState('');
+            
+            const [editingTeam, setEditingTeam] = useState(null);
+            const [editTeamNameValue, setEditTeamNameValue] = useState('');
+
             const [dragOverTeam, setDragOverTeam] = useState(null);
             const [isStarting, setIsStarting] = useState(false);
             const isHost = user.uid === gameState.hostId;
@@ -1232,12 +1243,12 @@
                     const updates = {};
                     let changed = false;
                     const teamTotals = {};
-                    for (let i = 1; i <= gameState.teamCount; i++) teamTotals[`隊伍${i}`] = 0;
+                    currentTeams.forEach(t => teamTotals[t] = 0);
 
-                    playersArray.forEach(p => { if (p.team) teamTotals[p.team]++; });
+                    playersArray.forEach(p => { if (p.team && teamTotals[p.team] !== undefined) teamTotals[p.team]++; });
 
                     Object.entries(gameState.players || {}).forEach(([uid, p]) => {
-                        if (!p.team) {
+                        if (!p.team || !currentTeams.includes(p.team)) {
                             const minTeam = Object.keys(teamTotals).reduce((a, b) => teamTotals[a] < teamTotals[b] ? a : b);
                             updates[`players.${uid}.team`] = minTeam;
                             teamTotals[minTeam]++;
@@ -1247,7 +1258,7 @@
                     if (changed) getGameRef(gameId).update(updates);
                 }, 800); 
                 return () => clearTimeout(timeoutId);
-            }, [playersStr, isHost, gameState.mode, gameId, gameState.teamCount]); 
+            }, [playersStr, isHost, gameState.mode, gameId, gameState.teamCount, JSON.stringify(currentTeams)]); 
 
             const changePlayerTeam = async (uid, newTeam) => {
                 await getGameRef(gameId).update({ [`players.${uid}.team`]: newTeam });
@@ -1261,6 +1272,46 @@
                 const uid = e.dataTransfer.getData('text/plain');
                 if (uid && gameState.players[uid]?.team !== teamName) await changePlayerTeam(uid, teamName);
             };
+
+            const updateTeamCount = async (newCount) => {
+                if (newCount < 2 || newCount > 10) return;
+                let newTeams = [...currentTeams];
+                let updates = { teamCount: newCount };
+
+                if (newCount > currentTeams.length) {
+                    for (let i = currentTeams.length; i < newCount; i++) {
+                        newTeams.push(`隊伍${i + 1}`);
+                    }
+                    updates.teams = newTeams;
+                } else {
+                    newTeams = currentTeams.slice(0, newCount);
+                    const removedTeams = currentTeams.slice(newCount);
+                    updates.teams = newTeams;
+                    Object.entries(gameState.players || {}).forEach(([uid, p]) => {
+                        if (removedTeams.includes(p.team)) {
+                            updates[`players.${uid}.team`] = null;
+                        }
+                    });
+                }
+                await getGameRef(gameId).update(updates);
+            };
+
+            const saveTeamName = async (oldName) => {
+                const newName = editTeamNameValue.trim();
+                if (!newName || newName === oldName || currentTeams.includes(newName)) {
+                    setEditingTeam(null);
+                    return;
+                }
+                const newTeams = currentTeams.map(t => t === oldName ? newName : t);
+                const updates = { teams: newTeams };
+                Object.entries(gameState.players || {}).forEach(([uid, p]) => {
+                    if (p.team === oldName) {
+                        updates[`players.${uid}.team`] = newName;
+                    }
+                });
+                await getGameRef(gameId).update(updates);
+                setEditingTeam(null);
+            };
             
             const handleHostJoin = async () => {
                 if (!hostNickname.trim() || isJoiningHost) return;
@@ -1270,7 +1321,7 @@
                     let assignedTeam = null;
                     if (gameState.mode === 'team') {
                         const teamTotals = {};
-                        for (let i = 1; i <= (gameState.teamCount || 2); i++) teamTotals[`隊伍${i}`] = 0;
+                        currentTeams.forEach(t => teamTotals[t] = 0);
                         Object.values(gameState.players || {}).forEach(p => { if (p.team && teamTotals[p.team] !== undefined) teamTotals[p.team]++; });
                         assignedTeam = Object.keys(teamTotals).reduce((a, b) => teamTotals[a] < teamTotals[b] ? a : b);
                     }
@@ -1321,7 +1372,7 @@
                             
                             <h2 className="text-3xl md:text-4xl font-bold text-white mb-3">等待遊戲開始</h2>
                             
-                            <div className="h-24 flex items-center justify-center mb-6">
+                            <div className="h-32 flex items-center justify-center mb-6">
                                 <p className={`text-base md:text-lg text-blue-200/90 font-medium transition-opacity duration-500 px-2 ${quoteFade ? 'opacity-100' : 'opacity-0'}`}>
                                     {quotes[quoteIndex]}
                                 </p>
@@ -1342,8 +1393,15 @@
                                 </div>
 
                                 {gameState.mode === 'team' && (
-                                    <div className="mt-5 inline-block px-5 py-2 bg-blue-500/30 border border-blue-400 rounded-full text-blue-100 font-bold text-lg shadow-lg">
-                                        {gameState.players[user.uid]?.team}
+                                    <div className="mt-5 inline-block px-5 py-2 bg-blue-500/30 border border-blue-400 rounded-full text-blue-100 font-bold text-lg shadow-lg group cursor-pointer" onClick={() => { setEditTeamNameValue(gameState.players[user.uid]?.team); setEditingTeam(gameState.players[user.uid]?.team); }}>
+                                        {editingTeam === gameState.players[user.uid]?.team ? (
+                                            <input type="text" autoFocus className="bg-transparent border-b border-white/50 text-center outline-none w-24 placeholder-white/50" value={editTeamNameValue} onChange={e => setEditTeamNameValue(e.target.value)} onBlur={() => saveTeamName(gameState.players[user.uid]?.team)} onKeyDown={e => e.key === 'Enter' && saveTeamName(gameState.players[user.uid]?.team)} maxLength="10" />
+                                        ) : (
+                                            <div className="flex items-center gap-2" title="點擊修改隊名">
+                                                {gameState.players[user.uid]?.team}
+                                                <Edit style={{fontSize: 14}} className="opacity-50 group-hover:opacity-100" />
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1390,6 +1448,15 @@
                                 <h2 className="text-2xl md:text-3xl font-bold text-white flex items-center"><Users className="mr-3 md:mr-4 text-blue-400 w-8 h-8 md:w-10 md:h-10" /> 已加入玩家</h2>
                                 <span className="px-5 py-2 bg-white/20 rounded-full text-white font-bold text-lg md:text-xl">{playersArray.length} 人</span>
                             </div>
+                            
+                            {isHost && gameState.mode === 'team' && (
+                                <div className="flex items-center justify-center gap-4 mb-6 bg-white/5 w-max mx-auto px-6 py-3 rounded-2xl border border-white/10">
+                                    <span className="text-white font-bold text-lg">調整隊伍數量：</span>
+                                    <button onClick={() => updateTeamCount(currentTeams.length - 1)} disabled={currentTeams.length <= 2} className="w-8 h-8 flex items-center justify-center bg-red-500/80 hover:bg-red-600 text-white rounded-full disabled:opacity-30 transition cursor-pointer"><Minus style={{fontSize: 14}} /></button>
+                                    <span className="text-white font-black text-2xl w-8 text-center">{currentTeams.length}</span>
+                                    <button onClick={() => updateTeamCount(currentTeams.length + 1)} disabled={currentTeams.length >= 10} className="w-8 h-8 flex items-center justify-center bg-blue-500/80 hover:bg-blue-600 text-white rounded-full disabled:opacity-30 transition cursor-pointer"><Plus style={{fontSize: 14}} /></button>
+                                </div>
+                            )}
 
                             {playersArray.length === 0 ? (
                                 <div className="flex-1 flex items-center justify-center text-white/50 italic text-xl md:text-2xl">等待玩家加入中...</div>
@@ -1397,12 +1464,20 @@
                                 <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
                                     {gameState.mode === 'team' ? (
                                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                                            {Array.from({ length: gameState.teamCount }).map((_, i) => {
-                                                const teamName = `隊伍${i + 1}`;
+                                            {currentTeams.map((teamName) => {
                                                 const teamMembers = playersArray.filter(p => p.team === teamName);
                                                 return (
                                                     <div key={teamName} className={`bg-white/10 backdrop-blur-md rounded-3xl shadow-lg p-5 md:p-6 border-t-4 transition-all duration-200 ${dragOverTeam === teamName ? 'border-yellow-400 bg-white/20 scale-[1.02]' : 'border-blue-400'}`} onDragOver={(e) => isHost && handleDragOver(e, teamName)} onDragLeave={isHost ? handleDragLeave : undefined} onDrop={(e) => isHost && handleDrop(e, teamName)}>
-                                                        <h3 className="font-bold text-xl md:text-2xl text-white mb-4 md:mb-5">{teamName} ({teamMembers.length} 人)</h3>
+                                                        <h3 className="font-bold text-xl md:text-2xl text-white mb-4 md:mb-5 flex items-center justify-center gap-2 group cursor-pointer" onClick={() => { if(isHost){ setEditTeamNameValue(teamName); setEditingTeam(teamName); } }}>
+                                                            {editingTeam === teamName && isHost ? (
+                                                                <input type="text" autoFocus className="bg-transparent border-b-2 border-white/50 focus:border-white text-center outline-none placeholder-white/50 w-32" value={editTeamNameValue} onChange={e => setEditTeamNameValue(e.target.value)} onBlur={() => saveTeamName(teamName)} onKeyDown={e => e.key === 'Enter' && saveTeamName(teamName)} maxLength="10" />
+                                                            ) : (
+                                                                <React.Fragment>
+                                                                    {teamName} ({teamMembers.length} 人)
+                                                                    {isHost && <Edit style={{fontSize: 18}} className="opacity-50 group-hover:opacity-100" />}
+                                                                </React.Fragment>
+                                                            )}
+                                                        </h3>
                                                         <div className="space-y-3 min-h-[80px]">
                                                             {teamMembers.map(p => {
                                                                 const isMe = p.uid === user.uid;
@@ -1418,7 +1493,7 @@
                                                                         </div>
                                                                         {isHost && (
                                                                             <select value={p.team || teamName} onChange={(e) => changePlayerTeam(p.uid, e.target.value)} className="text-sm md:text-base font-bold bg-white/90 text-gray-800 rounded-lg px-2 py-1 md:py-2 outline-none flex-shrink-0 cursor-pointer shadow-sm">
-                                                                                {Array.from({ length: gameState.teamCount }).map((_, j) => <option key={j} value={`隊伍${j + 1}`}>移至隊伍{j + 1}</option>)}
+                                                                                {currentTeams.map(t => <option key={t} value={t}>移至{t}</option>)}
                                                                             </select>
                                                                         )}
                                                                     </div>
@@ -1643,7 +1718,7 @@
             }, [isHost, hasSubmitted, currentQ.type]);
 
             if (!currentQ.type) {
-                return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl md:text-2xl"><Clock className="animate-spin mr-3" /> 載入題目資料中...</div>;
+                return <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white font-bold text-xl md:text-2xl"><Clock className="animate-spin mr-3" style={{fontSize: 28}} /> 載入題目資料中...</div>;
             }
 
             const toggleOption = (optId) => {
@@ -2132,9 +2207,10 @@
             const teamData = useMemo(() => {
                 const parsedPlayers = Object.entries(gameState.players || {}).map(([uid, p]) => ({ uid, ...p }));
                 const teams = {};
-                for (let i = 1; i <= gameState.teamCount; i++) {
-                    teams[`隊伍${i}`] = { id: `隊伍${i}`, name: `隊伍${i}`, currScore: 0, prevScore: 0, members: [] };
-                }
+                const currentTeams = gameState.teams || Array.from({length: gameState.teamCount || 2}, (_, i) => `隊伍${i+1}`);
+                currentTeams.forEach(t => {
+                    teams[t] = { id: t, name: t, currScore: 0, prevScore: 0, members: [] };
+                });
                 parsedPlayers.forEach(p => {
                     if (p.team && teams[p.team]) {
                         const earned = currentAnswers[p.uid]?.pointsEarned || 0;
@@ -2144,7 +2220,7 @@
                     }
                 });
                 return Object.values(teams);
-            }, [gameState.players, currentAnswers, gameState.teamCount]);
+            }, [gameState.players, currentAnswers, gameState.teams, gameState.teamCount]);
 
             const initialTeamOrder = useMemo(() => [...teamData].sort((a, b) => b.prevScore - a.prevScore), [teamData]);
             const finalTeamOrder = useMemo(() => [...teamData].sort((a, b) => b.currScore - a.currScore), [teamData]);
