@@ -77,7 +77,7 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Play, Plus, Minus, Trash2, Users, Clock, Trophy, Share2, Copy, CheckCircle2, XCircle, ArrowRight, Download, Upload, FileText, Edit, ImagePlus, X, GripVertical, Volume2, VolumeX, Music, Keyboard, SkipForward, UserX } from 'lucide-react';
+        import { Play, Plus, Minus, Trash2, Users, Clock, Trophy, Share2, Copy, CheckCircle2, XCircle, ArrowRight, Download, Upload, FileText, Edit, ImagePlus, X, GripVertical, Volume2, VolumeX, Music, Keyboard, SkipForward } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc, deleteField } from 'firebase/firestore';
@@ -264,21 +264,7 @@
             }, [user, gameId]);
 
             const gameStateRef = useRef(gameState);
-            useEffect(() => { 
-                if (user && gameState && gameStateRef.current) {
-                    // 偵測是否被主持人移出房間
-                    const wasPlayer = !!gameStateRef.current.players?.[user.uid];
-                    const isPlayerNow = !!gameState.players?.[user.uid];
-                    const isHost = gameState.hostId === user.uid;
-
-                    if (!isHost && wasPlayer && !isPlayerNow) {
-                        alert("您已被主持人移出房間。");
-                        setGameId(null);
-                        safeUpdateUrl(null);
-                    }
-                }
-                gameStateRef.current = gameState; 
-            }, [gameState, user]);
+            useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
 
             const [musicStatus, setMusicStatus] = useState('paused'); 
             const audioRef = useRef(null);
@@ -839,6 +825,10 @@
             const [isJoining, setIsJoining] = useState(false);
             const isDirectLink = !!new URLSearchParams(window.location.search).get('gameId');
 
+            // --- 新增：主持人接管狀態 ---
+            const [showHostLogin, setShowHostLogin] = useState(false);
+            const [hostPassword, setHostPassword] = useState('');
+
             const handleJoin = async (e) => {
                 e.preventDefault();
                 if (!nickname.trim() || (!isDirectLink && !pin.trim()) || isJoining) return;
@@ -883,6 +873,37 @@
                 }
             };
 
+            // --- 新增：接管主持人邏輯 ---
+            const handleHostTakeover = async (e) => {
+                e.preventDefault();
+                if (hostPassword === 'hkkeung') {
+                    try {
+                        const targetGameId = isDirectLink ? new URLSearchParams(window.location.search).get('gameId') : pin.trim().toUpperCase();
+                        const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', targetGameId);
+                        const gameSnap = await getDoc(gameRef);
+                        
+                        if (!gameSnap.exists()) {
+                            alert("找不到此遊戲房間代碼！");
+                            return;
+                        }
+
+                        // 將自己設為主持人
+                        await updateDoc(gameRef, { hostId: user.uid });
+                        
+                        if (!isDirectLink) {
+                            safeUpdateUrl(targetGameId);
+                        }
+                        onSetGameId(targetGameId);
+                        setShowHostLogin(false);
+                    } catch (error) {
+                        alert("切換主持人失敗，請稍後重試。");
+                    }
+                } else {
+                    alert("密碼錯誤！");
+                    setHostPassword('');
+                }
+            };
+
             return (
                 <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-4">
                     <div className="bg-white max-w-md w-full p-8 md:p-12 rounded-3xl shadow-2xl">
@@ -909,10 +930,29 @@
                         </form>
                     </div>
                     
-                    {!isDirectLink && (
-                        <div className="mt-10 text-center">
-                            <p className="text-gray-400 mb-3">我是主持人？</p>
-                            <button onClick={onNavigateCreate} className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white text-lg rounded-2xl font-bold transition border border-white/20">建立新遊戲 / 題庫</button>
+                    <div className="mt-10 text-center flex flex-col items-center gap-4">
+                        {!isDirectLink ? (
+                            <Fragment>
+                                <p className="text-gray-400">尚未建立遊戲？</p>
+                                <button onClick={onNavigateCreate} className="px-8 py-3 bg-white/10 hover:bg-white/20 text-white text-lg rounded-2xl font-bold transition border border-white/20">建立新遊戲 / 題庫</button>
+                            </Fragment>
+                        ) : (
+                            <button type="button" onClick={() => setShowHostLogin(true)} className="text-gray-400 hover:text-white underline text-lg font-bold transition">我是主持人？</button>
+                        )}
+                    </div>
+
+                    {/* 主持人接管驗證彈窗 */}
+                    {showHostLogin && (
+                        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[100] p-4 backdrop-blur-sm">
+                            <form onSubmit={handleHostTakeover} className="bg-white p-8 rounded-3xl max-w-sm w-full text-center animate-fade-in-up">
+                                <h3 className="text-2xl font-black text-gray-800 mb-4">主持人驗證</h3>
+                                <p className="text-gray-500 mb-6">請輸入密碼以進入主持人模式</p>
+                                <input type="password" autoFocus className="w-full px-5 py-4 text-2xl border-2 border-gray-200 rounded-2xl outline-none text-center font-bold focus:border-blue-500 mb-6" placeholder="輸入密碼" value={hostPassword} onChange={e => setHostPassword(e.target.value)} />
+                                <div className="flex gap-3">
+                                    <button type="button" onClick={() => { setShowHostLogin(false); setHostPassword(''); }} className="flex-1 py-4 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition">取消</button>
+                                    <button type="submit" className="flex-1 py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition">確認</button>
+                                </div>
+                            </form>
                         </div>
                     )}
                 </div>
@@ -933,10 +973,6 @@
             const [editingUid, setEditingUid] = useState(null);
             const [editNameValue, setEditNameValue] = useState('');
             const [editingTeamId, setEditingTeamId] = useState(null);
-
-            // 主持人密碼彈窗狀態
-            const [showHostPrompt, setShowHostPrompt] = useState(false);
-            const [hostPassword, setHostPassword] = useState('');
 
             // 背景圖片預載
             const hasPreloaded = useRef(false);
@@ -1004,18 +1040,6 @@
                 setEditingTeamId(null);
             };
 
-            const handleRemovePlayer = async (uid, nickname) => {
-                if (!window.confirm(`確定要將玩家「${nickname}」移出房間嗎？`)) return;
-                try {
-                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), {
-                        [`players.${uid}`]: deleteField()
-                    });
-                } catch (err) {
-                    console.error(err);
-                    alert("移除失敗，請稍後重試");
-                }
-            };
-
             const handleDrop = async (e, teamId) => {
                 e.preventDefault();
                 const uid = e.dataTransfer.getData('text/plain');
@@ -1024,25 +1048,23 @@
                 }
             };
 
+            // --- 新增：移除玩家邏輯 ---
+            const removePlayer = async (uid, nickname) => {
+                if (window.confirm(`確定要將玩家「${nickname}」移除嗎？`)) {
+                    try {
+                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), {
+                            [`players.${uid}`]: deleteField()
+                        });
+                    } catch (e) {
+                        alert("移除玩家失敗");
+                    }
+                }
+            };
+
             const startGame = async () => {
                 if (playersArray.length === 0) return alert("需要至少一位玩家！");
                 if (isStarting) return; setIsStarting(true);
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { status: 'starting_countdown', countdownDeadline: Date.now() + 3500 });
-            };
-
-            const handleBecomeHost = async () => {
-                if (hostPassword === 'hkkenug') {
-                    try {
-                        // 更新資料庫中的 hostId 為當前使用者的 uid
-                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { hostId: user.uid });
-                        setShowHostPrompt(false);
-                        setHostPassword('');
-                    } catch (err) {
-                        alert("切換失敗，請稍後重試");
-                    }
-                } else {
-                    alert("密碼錯誤！");
-                }
             };
 
             if (!isHost) {
@@ -1070,34 +1092,7 @@
                                 )}
                                 {gameState.mode === 'team' && <div className="mt-4 inline-block px-5 py-2 bg-blue-500/30 rounded-full text-blue-100 font-bold shadow">{gameState.teamNames?.[gameState.players[user.uid]?.team] || '隊伍'}</div>}
                             </div>
-
-                            {/* 隱藏的主持人切換入口 */}
-                            <div className="mt-6">
-                                <button onClick={() => setShowHostPrompt(true)} className="text-sm text-gray-400 hover:text-white underline underline-offset-4 transition">我是主持人？</button>
-                            </div>
                         </div>
-
-                        {/* 輸入密碼彈窗 */}
-                        {showHostPrompt && (
-                            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200] p-4" onClick={() => setShowHostPrompt(false)}>
-                                <div className="bg-gray-800 p-8 rounded-3xl max-w-sm w-full text-white border border-gray-600 animate-fade-in-up" onClick={e => e.stopPropagation()}>
-                                    <h3 className="text-2xl font-bold mb-6 text-center">輸入主持人密碼</h3>
-                                    <input 
-                                        type="password" 
-                                        autoFocus 
-                                        className="w-full bg-black/50 border border-gray-600 rounded-xl px-4 py-4 mb-6 outline-none focus:border-blue-500 text-center text-2xl tracking-widest" 
-                                        placeholder="請輸入密碼" 
-                                        value={hostPassword} 
-                                        onChange={e => setHostPassword(e.target.value)} 
-                                        onKeyDown={e => e.key === 'Enter' && handleBecomeHost()} 
-                                    />
-                                    <div className="flex gap-3">
-                                        <button onClick={() => { setShowHostPrompt(false); setHostPassword(''); }} className="flex-1 py-4 rounded-xl bg-gray-700 hover:bg-gray-600 font-bold transition text-lg">取消</button>
-                                        <button onClick={handleBecomeHost} className="flex-1 py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition text-lg">確認</button>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 );
             }
@@ -1111,12 +1106,8 @@
                             <div className="bg-white p-8 rounded-3xl shadow-xl text-center">
                                 <h2 className="text-lg font-bold text-gray-500 mb-2 uppercase">遊戲房間代碼 (PIN)</h2>
                                 <div className="text-6xl font-black text-blue-600 mb-6 bg-blue-50 py-6 rounded-2xl border-2 border-blue-200">{gameState.pin}</div>
-                                <h3 className="font-bold text-gray-800 mb-4">掃描 QR Code 或複製連結加入</h3>
-                                <div className="bg-gray-100 p-4 rounded-3xl inline-block border-2 border-dashed border-gray-300 mb-5"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(joinUrl)}&margin=10`} alt="QR Code" className="w-48 h-48 rounded-xl object-contain" /></div>
-                                <div className="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200">
-                                    <input type="text" readOnly value={joinUrl} className="flex-1 bg-transparent border-none outline-none text-sm text-gray-600 px-2 truncate" />
-                                    <button onClick={() => { const ta = document.createElement('textarea'); ta.value = joinUrl; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); alert('遊戲連結已複製！'); }catch(e){} document.body.removeChild(ta); }} className="p-3 bg-blue-100 text-blue-600 hover:bg-blue-200 rounded-lg transition flex-shrink-0" title="複製遊戲連結"><Copy size={18} /></button>
-                                </div>
+                                <h3 className="font-bold text-gray-800 mb-4">掃描 QR Code 加入</h3>
+                                <div className="bg-gray-100 p-4 rounded-3xl inline-block border-2 border-dashed border-gray-300"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(joinUrl)}&margin=10`} alt="QR Code" className="w-48 h-48 rounded-xl object-contain" /></div>
                             </div>
                             
                             {!isPlayer && (
@@ -1174,9 +1165,11 @@
                                                                         <span className="font-bold truncate">{p.nickname}</span>
                                                                     )}
                                                                 </div>
-                                                                <div className="flex items-center gap-2">
-                                                                    <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
-                                                                    {isHost && p.uid !== user.uid && <UserX size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500" onClick={() => handleRemovePlayer(p.uid, p.nickname)} title="移出房間"/>}
+                                                                <div className="flex items-center gap-3">
+                                                                    <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300 hover:text-blue-400" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
+                                                                    {isHost && (
+                                                                        <Trash2 size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500" onClick={() => removePlayer(p.uid, p.nickname)} title="移除玩家" />
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -1188,14 +1181,16 @@
                                 ) : (
                                     <div className="flex flex-wrap gap-4">
                                         {playersArray.map((p) => (
-                                            <div key={p.uid} className="bg-white/20 py-3 px-5 rounded-2xl font-bold text-lg group flex items-center gap-2">
+                                            <div key={p.uid} className="bg-white/20 py-3 px-5 rounded-2xl font-bold text-lg group flex items-center justify-center gap-2 relative min-w-[120px]">
                                                 {editingUid === p.uid ? (
                                                     <input type="text" autoFocus className="w-24 bg-transparent border-b border-white outline-none text-center" value={editNameValue} onChange={e=>setEditNameValue(e.target.value)} onBlur={()=>saveNickname(p.uid)} onKeyDown={e=>e.key==='Enter'&&saveNickname(p.uid)}/>
                                                 ) : (
                                                     <Fragment>
                                                         <span>{p.nickname}</span>
-                                                        <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
-                                                        {isHost && p.uid !== user.uid && <UserX size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500 ml-1" onClick={(e)=>{e.stopPropagation(); handleRemovePlayer(p.uid, p.nickname);}} title="移出房間"/>}
+                                                        <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300 hover:text-blue-400" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
+                                                        {isHost && (
+                                                            <Trash2 size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500 absolute right-3" onClick={() => removePlayer(p.uid, p.nickname)} title="移除玩家" />
+                                                        )}
                                                     </Fragment>
                                                 )}
                                             </div>
