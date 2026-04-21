@@ -923,12 +923,12 @@
                             {!isDirectLink && (
                                 <div>
                                     <label className="block font-bold text-gray-700 mb-2">輸入 6 碼遊戲代碼 (PIN)</label>
-                                    <input type="text" className="w-full px-5 py-4 text-2xl border-2 rounded-2xl outline-none text-center font-bold uppercase tracking-widest focus:border-blue-500" placeholder="例如：123456" value={pin} onChange={e => setPin(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
+                                    <input type="text" className="w-full px-5 py-4 text-2xl border-2 rounded-2xl outline-none text-center font-bold uppercase tracking-widest text-gray-800 focus:border-blue-500" placeholder="例如：123456" value={pin} onChange={e => setPin(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} />
                                 </div>
                             )}
                             <div>
                                 <label className="block font-bold text-gray-700 mb-2">輸入你的專屬暱稱</label>
-                                <input type="text" maxLength="12" className="w-full px-5 py-4 text-2xl border-2 rounded-2xl outline-none text-center font-bold focus:border-blue-500" placeholder="你的名字" value={nickname} onChange={e => setNickname(e.target.value)} autoFocus={isDirectLink} />
+                                <input type="text" maxLength="12" className="w-full px-5 py-4 text-2xl border-2 rounded-2xl outline-none text-center font-bold text-gray-800 focus:border-blue-500" placeholder="你的名字" value={nickname} onChange={e => setNickname(e.target.value)} autoFocus={isDirectLink} />
                             </div>
                             <button type="submit" disabled={!nickname.trim() || (!isDirectLink && !pin.trim()) || isJoining} className="w-full py-5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xl font-bold rounded-2xl shadow-xl hover:opacity-90 transition disabled:opacity-50">
                                 {isJoining ? <span className="flex items-center justify-center"><Clock className="animate-spin mr-3" /> 加入中...</span> : "確認加入"}
@@ -953,7 +953,7 @@
                             <form onSubmit={handleHostTakeover} className="bg-white p-8 rounded-3xl max-w-sm w-full text-center animate-fade-in-up">
                                 <h3 className="text-2xl font-black text-gray-800 mb-4">主持人驗證</h3>
                                 <p className="text-gray-500 mb-6">請輸入密碼以進入主持人模式</p>
-                                <input type="password" autoFocus className="w-full px-5 py-4 text-2xl border-2 border-gray-200 rounded-2xl outline-none text-center font-bold focus:border-blue-500 mb-6" placeholder="輸入密碼" value={hostPassword} onChange={e => setHostPassword(e.target.value)} />
+                                <input type="password" autoFocus className="w-full px-5 py-4 text-2xl border-2 border-gray-200 rounded-2xl outline-none text-center font-bold text-gray-800 focus:border-blue-500 mb-6" placeholder="輸入密碼" value={hostPassword} onChange={e => setHostPassword(e.target.value)} />
                                 <div className="flex gap-3">
                                     <button type="button" onClick={() => { setShowHostLogin(false); setHostPassword(''); }} className="flex-1 py-4 bg-gray-200 text-gray-700 font-bold rounded-xl hover:bg-gray-300 transition">取消</button>
                                     <button type="submit" className="flex-1 py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition">確認</button>
@@ -1113,7 +1113,15 @@
                                 <h2 className="text-lg font-bold text-gray-500 mb-2 uppercase">遊戲房間代碼 (PIN)</h2>
                                 <div className="text-6xl font-black text-blue-600 mb-6 bg-blue-50 py-6 rounded-2xl border-2 border-blue-200">{gameState.pin}</div>
                                 <h3 className="font-bold text-gray-800 mb-4">掃描 QR Code 加入</h3>
-                                <div className="bg-gray-100 p-4 rounded-3xl inline-block border-2 border-dashed border-gray-300"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(joinUrl)}&margin=10`} alt="QR Code" className="w-48 h-48 rounded-xl object-contain" /></div>
+                                <div className="bg-gray-100 p-4 rounded-3xl inline-block border-2 border-dashed border-gray-300 mb-4"><img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(joinUrl)}&margin=10`} alt="QR Code" className="w-48 h-48 rounded-xl object-contain" /></div>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <input type="text" readOnly value={joinUrl} className="flex-1 bg-gray-100 border-none rounded-xl text-sm p-3 outline-none text-gray-600 font-medium" />
+                                    <button onClick={() => {
+                                        const textArea = document.createElement("textarea"); textArea.value = joinUrl; document.body.appendChild(textArea); textArea.select();
+                                        try { document.execCommand('copy'); alert('連結已複製！'); } catch (err) {}
+                                        document.body.removeChild(textArea);
+                                    }} className="p-3 bg-blue-100 text-blue-600 rounded-xl hover:bg-blue-200 transition" title="複製連結"><Copy size={20} /></button>
+                                </div>
                             </div>
                             
                             {!isPlayer && (
