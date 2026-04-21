@@ -435,6 +435,12 @@
                 return <JoinGame user={user} onSetGameId={setGameId} onNavigateCreate={() => { setReusableQuestions([]); setView('create'); }} db={db} appId={appId} safeUpdateUrl={safeUpdateUrl} gameState={gameState} />;
             }
 
+            // 新增：攔截掃描 QR Code / 點擊連結進來的玩家
+            // 如果玩家不是主持人，且還沒有存在於這個房間的 players 名單中，就強制顯示輸入暱稱的畫面！
+            if (gameState && user && user.uid !== gameState.hostId && !gameState.players?.[user.uid]) {
+                return <JoinGame user={user} onSetGameId={setGameId} onNavigateCreate={() => { setReusableQuestions([]); setView('create'); }} db={db} appId={appId} safeUpdateUrl={safeUpdateUrl} gameState={gameState} />;
+            }
+
             if (gameState) {
                 const isHostMode = user && user.uid === gameState.hostId;
                 
