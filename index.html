@@ -77,10 +77,10 @@
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
         import { createRoot } from 'react-dom/client';
-        import { Play, Plus, Minus, Trash2, Users, Clock, Trophy, Share2, Copy, CheckCircle2, XCircle, ArrowRight, Download, Upload, FileText, Edit, ImagePlus, X, GripVertical, Volume2, VolumeX, Music, Keyboard, SkipForward } from 'lucide-react';
+        import { Play, Plus, Minus, Trash2, Users, Clock, Trophy, Share2, Copy, CheckCircle2, XCircle, ArrowRight, Download, Upload, FileText, Edit, ImagePlus, X, GripVertical, Volume2, VolumeX, Music, Keyboard, SkipForward, UserX } from 'lucide-react';
         import { initializeApp } from 'firebase/app';
         import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+        import { getFirestore, doc, setDoc, getDoc, updateDoc, onSnapshot, deleteDoc, deleteField } from 'firebase/firestore';
 
         // --- Firebase 初始化 ---
         const firebaseConfig = {
@@ -264,7 +264,21 @@
             }, [user, gameId]);
 
             const gameStateRef = useRef(gameState);
-            useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+            useEffect(() => { 
+                if (user && gameState && gameStateRef.current) {
+                    // 偵測是否被主持人移出房間
+                    const wasPlayer = !!gameStateRef.current.players?.[user.uid];
+                    const isPlayerNow = !!gameState.players?.[user.uid];
+                    const isHost = gameState.hostId === user.uid;
+
+                    if (!isHost && wasPlayer && !isPlayerNow) {
+                        alert("您已被主持人移出房間。");
+                        setGameId(null);
+                        safeUpdateUrl(null);
+                    }
+                }
+                gameStateRef.current = gameState; 
+            }, [gameState, user]);
 
             const [musicStatus, setMusicStatus] = useState('paused'); 
             const audioRef = useRef(null);
@@ -920,6 +934,10 @@
             const [editNameValue, setEditNameValue] = useState('');
             const [editingTeamId, setEditingTeamId] = useState(null);
 
+            // 主持人密碼彈窗狀態
+            const [showHostPrompt, setShowHostPrompt] = useState(false);
+            const [hostPassword, setHostPassword] = useState('');
+
             // 背景圖片預載
             const hasPreloaded = useRef(false);
             const qStr = JSON.stringify(gameState.questions?.map(q=>q.id));
@@ -986,6 +1004,18 @@
                 setEditingTeamId(null);
             };
 
+            const handleRemovePlayer = async (uid, nickname) => {
+                if (!window.confirm(`確定要將玩家「${nickname}」移出房間嗎？`)) return;
+                try {
+                    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), {
+                        [`players.${uid}`]: deleteField()
+                    });
+                } catch (err) {
+                    console.error(err);
+                    alert("移除失敗，請稍後重試");
+                }
+            };
+
             const handleDrop = async (e, teamId) => {
                 e.preventDefault();
                 const uid = e.dataTransfer.getData('text/plain');
@@ -998,6 +1028,21 @@
                 if (playersArray.length === 0) return alert("需要至少一位玩家！");
                 if (isStarting) return; setIsStarting(true);
                 await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { status: 'starting_countdown', countdownDeadline: Date.now() + 3500 });
+            };
+
+            const handleBecomeHost = async () => {
+                if (hostPassword === 'hkkenug') {
+                    try {
+                        // 更新資料庫中的 hostId 為當前使用者的 uid
+                        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'games', gameId), { hostId: user.uid });
+                        setShowHostPrompt(false);
+                        setHostPassword('');
+                    } catch (err) {
+                        alert("切換失敗，請稍後重試");
+                    }
+                } else {
+                    alert("密碼錯誤！");
+                }
             };
 
             if (!isHost) {
@@ -1025,7 +1070,34 @@
                                 )}
                                 {gameState.mode === 'team' && <div className="mt-4 inline-block px-5 py-2 bg-blue-500/30 rounded-full text-blue-100 font-bold shadow">{gameState.teamNames?.[gameState.players[user.uid]?.team] || '隊伍'}</div>}
                             </div>
+
+                            {/* 隱藏的主持人切換入口 */}
+                            <div className="mt-6">
+                                <button onClick={() => setShowHostPrompt(true)} className="text-sm text-gray-400 hover:text-white underline underline-offset-4 transition">我是主持人？</button>
+                            </div>
                         </div>
+
+                        {/* 輸入密碼彈窗 */}
+                        {showHostPrompt && (
+                            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200] p-4" onClick={() => setShowHostPrompt(false)}>
+                                <div className="bg-gray-800 p-8 rounded-3xl max-w-sm w-full text-white border border-gray-600 animate-fade-in-up" onClick={e => e.stopPropagation()}>
+                                    <h3 className="text-2xl font-bold mb-6 text-center">輸入主持人密碼</h3>
+                                    <input 
+                                        type="password" 
+                                        autoFocus 
+                                        className="w-full bg-black/50 border border-gray-600 rounded-xl px-4 py-4 mb-6 outline-none focus:border-blue-500 text-center text-2xl tracking-widest" 
+                                        placeholder="請輸入密碼" 
+                                        value={hostPassword} 
+                                        onChange={e => setHostPassword(e.target.value)} 
+                                        onKeyDown={e => e.key === 'Enter' && handleBecomeHost()} 
+                                    />
+                                    <div className="flex gap-3">
+                                        <button onClick={() => { setShowHostPrompt(false); setHostPassword(''); }} className="flex-1 py-4 rounded-xl bg-gray-700 hover:bg-gray-600 font-bold transition text-lg">取消</button>
+                                        <button onClick={handleBecomeHost} className="flex-1 py-4 rounded-xl bg-blue-600 hover:bg-blue-700 font-bold transition text-lg">確認</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 );
             }
@@ -1098,7 +1170,10 @@
                                                                         <span className="font-bold truncate">{p.nickname}</span>
                                                                     )}
                                                                 </div>
-                                                                <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
+                                                                <div className="flex items-center gap-2">
+                                                                    <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
+                                                                    {isHost && p.uid !== user.uid && <UserX size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500" onClick={() => handleRemovePlayer(p.uid, p.nickname)} title="移出房間"/>}
+                                                                </div>
                                                             </div>
                                                         ))}
                                                     </div>
@@ -1113,7 +1188,11 @@
                                                 {editingUid === p.uid ? (
                                                     <input type="text" autoFocus className="w-24 bg-transparent border-b border-white outline-none text-center" value={editNameValue} onChange={e=>setEditNameValue(e.target.value)} onBlur={()=>saveNickname(p.uid)} onKeyDown={e=>e.key==='Enter'&&saveNickname(p.uid)}/>
                                                 ) : (
-                                                    <Fragment><span>{p.nickname}</span><Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/></Fragment>
+                                                    <Fragment>
+                                                        <span>{p.nickname}</span>
+                                                        <Edit size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-blue-300" onClick={()=>{setEditNameValue(p.nickname); setEditingUid(p.uid);}}/>
+                                                        {isHost && p.uid !== user.uid && <UserX size={16} className="opacity-0 group-hover:opacity-100 cursor-pointer text-red-400 hover:text-red-500 ml-1" onClick={(e)=>{e.stopPropagation(); handleRemovePlayer(p.uid, p.nickname);}} title="移出房間"/>}
+                                                    </Fragment>
                                                 )}
                                             </div>
                                         ))}
